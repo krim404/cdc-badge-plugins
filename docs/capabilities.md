@@ -1,0 +1,48 @@
+# Capabilities
+
+Capabilities answer the question **"what is this plugin allowed to do?"**. They are checked once at load time (slot conflicts, reserved resources) and then enforced at runtime on every host API call.
+
+## Static checks at load
+
+- `host_api_level_min` matches the firmware's level
+- `linear_memory_kb` is within `[16, 1024]`
+- `rmem` names are 1-15 chars (the on-chip name field holds 16 bytes incl. NUL)
+- ECC slots are not 0 (attestation) or 4 (CA)
+- BLE service UUIDs do not collide with another loaded plugin
+- `nvs_namespace` is unique among loaded plugins
+
+## Runtime enforcement
+
+When a plugin calls a host function whose access is gated by a capability, the host checks the declared list before performing the action. A denial returns `HOST_ERR_NO_CAPABILITY` and writes an entry to the badge log. The plugin keeps running.
+
+Examples:
+
+| Call | Required capability |
+|------|---------------------|
+| `host_rmem_{read,write,erase}_named(name, ...)` | `rmem` must contain `name` |
+| `host_ecc_sign(slot, ...)` | `ecc_slots` must contain `slot` |
+| `host_wifi_request()` | `wifi: true` |
+| `host_http_open(...)` | `http: true` |
+| `host_display_*` low-level GFX | `display_lowlevel: true` |
+| `host_ble_register_service(...)` | `ble: true`, UUID in `ble_service_uuids` |
+| `host_gpio_*` | pin in `gpio_pins`, or `grove: true` for GPIO 2/3, or `sao: true` for GPIO 15/16 |
+| `host_gpio_pwm_*` | pin in `pwm_pins` |
+| `host_adc_read(pin, ...)` | pin in `adc_pins` |
+| `host_i2c_*` | bus in `i2c_bus` (bus 0 is reserved) |
+| `host_sao_eeprom_*` | `sao: true` (uses I2C1 0x50 transparently) |
+| `host_nvs_*` | always permitted, but isolated to `plugin_<id>` namespace |
+
+## Hardware shortcuts
+
+The shortcuts `grove` and `sao` unlock all pins of the corresponding port without listing them individually:
+
+| Shortcut | Unlocks |
+|----------|---------|
+| `grove: true` | GPIO 2 (SIG0), GPIO 3 (SIG1), `pwm_pins` for the same range |
+| `sao: true`   | GPIO 15, GPIO 16, I2C1 access at address `0x50` (SAO EEPROM) |
+
+Loading two plugins that both want the same physical pin is rejected at load time - the second plugin sees a "GPIO N already held by `<other_id>`" error and is not started.
+
+## Forbidden APIs
+
+A small set of APIs are simply not exported to plugins, regardless of capability declaration: anything that touches the lock-screen / PIN system, BLE bond management, charger control, deep sleep, and direct HID report emission. The full list lives in the [host API reference](host_api_reference.md).

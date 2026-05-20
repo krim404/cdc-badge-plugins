@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "translations": {
+    "de": {
+      "meta.name": "Hallo Welt",
+      "meta.description": "Smoke-Test-Plugin, das einen Toast zeigt.",
+      "greeting": "Hallo aus WASM!"
+    }
+  }
+}

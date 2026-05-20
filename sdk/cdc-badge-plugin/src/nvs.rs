@@ -1,0 +1,117 @@
+//! \file
+//! \brief Plugin-namespaced NVS (non-volatile storage) access.
+//!
+//! The host automatically routes every call into a per-plugin namespace
+//! derived from `capabilities.nvs_namespace`, so there is no risk of
+//! colliding with other plugins or the firmware itself.
+
+use crate::ffi;
+use alloc::ffi::CString;
+use alloc::string::String;
+use alloc::vec::Vec;
+
+/// \brief Read a binary blob from NVS.
+/// \param key NVS key inside the plugin's namespace.
+/// \return The stored bytes, or `None` if the key is missing or unreadable.
+pub fn get_blob(key: &str) -> Option<Vec<u8>> {
+    let k = CString::new(key).ok()?;
+    let mut len: usize = 0;
+    let rc = unsafe { ffi::host_nvs_get_blob(k.as_ptr(), core::ptr::null_mut(), &mut len) };
+    if rc != 0 || len == 0 {
+        return None;
+    }
+    let mut buf = Vec::with_capacity(len);
+    let rc = unsafe {
+        buf.set_len(len);
+        ffi::host_nvs_get_blob(k.as_ptr(), buf.as_mut_ptr(), &mut len)
+    };
+    if rc == 0 {
+        buf.truncate(len);
+        Some(buf)
+    } else {
+        None
+    }
+}
+
+/// \brief Write a binary blob to NVS.
+/// \param key   NVS key inside the plugin's namespace.
+/// \param value Payload bytes.
+/// \return `true` on success.
+pub fn set_blob(key: &str, value: &[u8]) -> bool {
+    let Ok(k) = CString::new(key) else {
+        return false;
+    };
+    let rc = unsafe { ffi::host_nvs_set_blob(k.as_ptr(), value.as_ptr(), value.len()) };
+    rc == 0
+}
+
+/// \brief Read a UTF-8 string from NVS.
+/// \param key     NVS key inside the plugin's namespace.
+/// \param max_len Maximum number of bytes to read (excl. NUL).
+/// \return The stored string, or `None` if missing / non-UTF-8.
+pub fn get_str(key: &str, max_len: usize) -> Option<String> {
+    let k = CString::new(key).ok()?;
+    let mut buf = Vec::<u8>::with_capacity(max_len);
+    let rc = unsafe {
+        buf.set_len(max_len);
+        ffi::host_nvs_get_str(k.as_ptr(), buf.as_mut_ptr() as *mut _, max_len)
+    };
+    if rc != 0 {
+        return None;
+    }
+    let n = buf.iter().position(|&b| b == 0).unwrap_or(max_len);
+    buf.truncate(n);
+    String::from_utf8(buf).ok()
+}
+
+/// \brief Write a UTF-8 string to NVS.
+/// \param key   NVS key inside the plugin's namespace.
+/// \param value String value (must not contain interior NULs).
+/// \return `true` on success.
+pub fn set_str(key: &str, value: &str) -> bool {
+    let Ok(k) = CString::new(key) else {
+        return false;
+    };
+    let Ok(v) = CString::new(value) else {
+        return false;
+    };
+    let rc = unsafe { ffi::host_nvs_set_str(k.as_ptr(), v.as_ptr()) };
+    rc == 0
+}
+
+/// \brief Read a 32-bit unsigned integer from NVS.
+/// \param key NVS key inside the plugin's namespace.
+/// \return The stored value, or `None` if the key is missing.
+pub fn get_u32(key: &str) -> Option<u32> {
+    let k = CString::new(key).ok()?;
+    let mut out: u32 = 0;
+    let rc = unsafe { ffi::host_nvs_get_u32(k.as_ptr(), &mut out) };
+    if rc == 0 {
+        Some(out)
+    } else {
+        None
+    }
+}
+
+/// \brief Write a 32-bit unsigned integer to NVS.
+/// \param key   NVS key inside the plugin's namespace.
+/// \param value Value to store.
+/// \return `true` on success.
+pub fn set_u32(key: &str, value: u32) -> bool {
+    let Ok(k) = CString::new(key) else {
+        return false;
+    };
+    let rc = unsafe { ffi::host_nvs_set_u32(k.as_ptr(), value) };
+    rc == 0
+}
+
+/// \brief Remove a key from NVS.
+/// \param key NVS key inside the plugin's namespace.
+/// \return `true` on success, including the "already absent" case.
+pub fn erase(key: &str) -> bool {
+    let Ok(k) = CString::new(key) else {
+        return false;
+    };
+    let rc = unsafe { ffi::host_nvs_erase(k.as_ptr()) };
+    rc == 0
+}

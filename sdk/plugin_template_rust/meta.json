@@ -1,0 +1,21 @@
+{
+  "id": "my_plugin",
+  "version": "0.1.0",
+  "author": "your_name",
+  "icon": "info",
+  "host_api_level_min": "0.5",
+  "linear_memory_kb": 64,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name":        { "en": "My Plugin",       "de": "Mein Plugin" },
+      "description": { "en": "Describe your plugin here.",
+                       "de": "Beschreibe dein Plugin hier." }
+    },
+    "strings": {}
+  },
+  "capabilities": {
+    "ui_exclusive": false
+  },
+  "prerequisites": {}
+}

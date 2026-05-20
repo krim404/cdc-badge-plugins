@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "translations": {
+    "de": {
+      "meta.name": "Grove LED",
+      "meta.description": "Steuert den WS2813-LED-Streifen am Grove-Port.",
+      "menu_enable": "LEDs",
+      "menu_count": "Anzahl LEDs",
+      "menu_bright": "Helligkeit",
+      "menu_color": "Farbe",
+      "menu_effect": "Effekt",
+      "menu_speed": "Geschwindigkeit",
+      "effect_rainbow": "Regenbogen",
+      "effect_static": "Statisch",
+      "effect_blink": "Blinken",
+      "effect_breathing": "Atmen",
+      "label_r": "Rot",
+      "label_g": "Grün",
+      "label_b": "Blau",
+      "on": "An",
+      "off": "Aus",
+      "saved": "Gespeichert"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "translations": {
+    "de": {
+      "meta.name": "Akku-Widget",
+      "meta.description": "Zeigt live den Akkustand ueber die Host-Power-API."
+    }
+  }
+}

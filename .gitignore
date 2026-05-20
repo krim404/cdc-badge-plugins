@@ -1,0 +1,26 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# WASM build output (use release artifacts instead)
+*.wasm
+!sdk/**/*.wasm.template
+build/
+dist/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# CI artifacts
+_site/
+catalog.json

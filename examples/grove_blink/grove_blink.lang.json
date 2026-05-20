@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "translations": {
+    "de": {
+      "meta.name": "Grove Blinken",
+      "meta.description": "LED an Grove-Pin 0 mit Y umschalten.",
+      "press_y_to_toggle": "Y zum Umschalten.",
+      "led_on": "LED an",
+      "led_off": "LED aus"
+    }
+  }
+}

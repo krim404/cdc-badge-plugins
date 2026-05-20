@@ -1,0 +1,14 @@
+[package]
+name = "home_assistant"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+cdc-badge-plugin = { path = "../../sdk/cdc-badge-plugin", features = ["panic_handler"] }
+serde         = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json    = { version = "1", default-features = false, features = ["alloc"] }

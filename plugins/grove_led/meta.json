@@ -1,0 +1,44 @@
+{
+  "id": "grove_led",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "info",
+  "host_api_level_min": "0.5",
+  "linear_memory_kb": 64,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": {
+        "en": "Grove LED"
+      },
+      "description": {
+        "en": "Drive the WS2813 strip on the Grove port."
+      }
+    },
+    "strings": {
+      "menu_enable":  { "en": "LEDs" },
+      "menu_count":   { "en": "LED Count" },
+      "menu_bright":  { "en": "Brightness" },
+      "menu_color":   { "en": "Color" },
+      "menu_effect":  { "en": "Effect" },
+      "menu_speed":   { "en": "Speed" },
+      "effect_rainbow":   { "en": "Rainbow" },
+      "effect_static":    { "en": "Static" },
+      "effect_blink":     { "en": "Blink" },
+      "effect_breathing": { "en": "Breathing" },
+      "label_r": { "en": "Red" },
+      "label_g": { "en": "Green" },
+      "label_b": { "en": "Blue" },
+      "on":     { "en": "On" },
+      "off":    { "en": "Off" },
+      "saved":  { "en": "Saved" }
+    }
+  },
+  "capabilities": {
+    "background": true,
+    "pixel_strip": true,
+    "ui_exclusive": false,
+    "nvs_namespace": "plg_grove_led"
+  },
+  "prerequisites": {}
+}

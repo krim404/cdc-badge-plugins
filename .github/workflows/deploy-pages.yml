@@ -1,0 +1,69 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "webflasher/**"
+      - "examples/**/meta.json"
+      - "plugins/**/meta.json"
+      - "tools/generate_catalog.py"
+      - ".github/workflows/deploy-pages.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Latest release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_FULL: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh api "repos/${REPO_FULL}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "v0.0.0-dev")
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build catalog
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          REPO_FULL: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp -r webflasher/* _site/
+          python3 tools/generate_catalog.py \
+            --release-base-url "https://github.com/${REPO_FULL}/releases/download/${TAG}" \
+            --version "${TAG}" \
+            --out _site/catalog.json
+
+      - uses: actions/configure-pages@v4
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

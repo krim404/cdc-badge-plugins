@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "sdk/cdc-badge-plugin",
+    "examples/hello_world",
+    "examples/battery_widget",
+    "examples/grove_blink",
+    "examples/news_feed",
+    "plugins/home_assistant",
+    "plugins/grove_led",
+]
+exclude = [
+    "sdk/plugin_template_rust",
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

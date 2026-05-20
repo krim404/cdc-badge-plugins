@@ -1,0 +1,35 @@
+{
+  "id": "grove_blink",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "info",
+  "host_api_level_min": "0.5",
+  "linear_memory_kb": 64,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": {
+        "en": "Grove Blink"
+      },
+      "description": {
+        "en": "Toggle an LED on Grove pin 0 by pressing Y."
+      }
+    },
+    "strings": {
+      "press_y_to_toggle": {
+        "en": "Press Y to toggle."
+      },
+      "led_on": {
+        "en": "LED on"
+      },
+      "led_off": {
+        "en": "LED off"
+      }
+    }
+  },
+  "capabilities": {
+    "grove": true,
+    "ui_exclusive": false
+  },
+  "prerequisites": {}
+}

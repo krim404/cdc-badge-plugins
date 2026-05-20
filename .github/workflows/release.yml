@@ -1,0 +1,67 @@
+name: Release Plugins
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BINARYEN_VERSION: version_119
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-opt
+        run: |
+          set -euo pipefail
+          curl -L "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar xz
+          sudo cp "binaryen-${BINARYEN_VERSION}/bin/wasm-opt" /usr/local/bin/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build all plugins
+        run: ./tools/build_all.sh
+
+      - name: Resolve release version
+        id: version
+        env:
+          GIT_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          VERSION="${GIT_REF#refs/tags/}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate catalog
+        env:
+          REPO_FULL: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 tools/generate_catalog.py \
+            --release-base-url "https://github.com/${REPO_FULL}/releases/download/${VERSION}" \
+            --version "${VERSION}" \
+            --out dist/catalog.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/*.wasm
+            dist/*.meta.json
+            dist/*.lang.json
+            dist/catalog.json
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

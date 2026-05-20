@@ -1,0 +1,99 @@
+{
+  "id": "home_assistant",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "ha",
+  "host_api_level_min": "0.5",
+  "linear_memory_kb": 1024,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": {
+        "en": "Home Assistant"
+      },
+      "description": {
+        "en": "HA controller: favorites, browse, light, cover, climate."
+      }
+    },
+    "strings": {
+      "actions": { "en": "Actions" },
+      "added": { "en": "Added" },
+      "all_domains": { "en": "All domains" },
+      "already_fav": { "en": "Already a favorite" },
+      "brightness": { "en": "Brightness" },
+      "browse": { "en": "Browse" },
+      "browse_all": { "en": "Browse all" },
+      "buttons": { "en": "Buttons" },
+      "climate_current": { "en": "now:" },
+      "climate_fan": { "en": "Fan" },
+      "climate_footer": { "en": "[1/2/3] mode  [4/6] target  [5] fan  [Y] save" },
+      "climates": { "en": "Climate" },
+      "color": { "en": "Color" },
+      "color_red": { "en": "Red" },
+      "color_green": { "en": "Green" },
+      "color_blue": { "en": "Blue" },
+      "color_warm": { "en": "Warm white" },
+      "color_cool": { "en": "Cool white" },
+      "color_off": { "en": "Off" },
+      "cover_position": { "en": "Position" },
+      "covers": { "en": "Covers" },
+      "filter": { "en": "Filter" },
+      "ha_error": { "en": "HA error" },
+      "ha_unreachable": { "en": "HA unreachable" },
+      "hint_browse": { "en": "[Y] add  [3] filter  [N] back" },
+      "hint_home": { "en": "[Y] act  [3] menu  [N] back" },
+      "hint_open_browse": { "en": "[3] menu -> Browse all" },
+      "hint_setup_menu": { "en": "[3] menu" },
+      "host": { "en": "HA server (host[:port])" },
+      "host_required": { "en": "Host is required" },
+      "lights": { "en": "Lights" },
+      "loading": { "en": "Loading..." },
+      "max_favs": { "en": "Max favorites" },
+      "no": { "en": "No" },
+      "no_favorites": { "en": "No favorites yet" },
+      "status_no_favorites": { "en": "No favorites - press [3]" },
+      "status_not_configured": { "en": "Not configured - press [3]" },
+      "port": { "en": "Port" },
+      "remove": { "en": "Remove" },
+      "remove_confirm": { "en": "Remove favorite?" },
+      "removed": { "en": "Removed" },
+      "reset_confirm": { "en": "Reset module?" },
+      "reset_done": { "en": "Module reset" },
+      "reset_module": { "en": "Reset module" },
+      "save_failed": { "en": "Save failed" },
+      "saved": { "en": "Saved" },
+      "scenes": { "en": "Scenes" },
+      "scripts": { "en": "Scripts" },
+      "search": { "en": "Search" },
+      "sensors": { "en": "Sensors" },
+      "serial_hint": { "en": "Use PASTE <text> via serial" },
+      "setup_title": { "en": "Setup" },
+      "setup_wizard": { "en": "Server URL" },
+      "probing": { "en": "Probing connection..." },
+      "switches": { "en": "Switches" },
+      "toggle_failed": { "en": "Toggle failed" },
+      "toggle_ok": { "en": "Toggled" },
+      "token_ok": { "en": "Token saved" },
+      "token_title": { "en": "HA API token" },
+      "unsupported": { "en": "Unsupported entity" },
+      "url_saved": { "en": "URL saved" },
+      "use_https": { "en": "Use HTTPS?" },
+      "yes": { "en": "Yes" }
+    }
+  },
+  "capabilities": {
+    "wifi": true,
+    "http": true,
+    "rmem": [
+      "ha_token"
+    ],
+    "nvs_namespace": "plugin_ha",
+    "ui_exclusive": true
+  },
+  "prerequisites": {
+    "wifi_connected": {
+      "timeout_ms": 15000,
+      "on_fail": "abort"
+    }
+  }
+}

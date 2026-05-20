@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "translations": {
+    "de": {
+      "meta.name": "Newsfeed",
+      "meta.description": "Schlagzeilen aus einem Atom-RSS-Feed.",
+      "loading": "Lade...",
+      "fetch_failed": "(Abruf fehlgeschlagen)",
+      "parse_failed": "(Parser-Fehler)",
+      "no_entries": "(keine Eintraege)",
+      "feed_url": "Feed-URL",
+      "hint_main": "[Y] Lesen [1] Neuladen [3] URL [N] Zurueck"
+    }
+  }
+}

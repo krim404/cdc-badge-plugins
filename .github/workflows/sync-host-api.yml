@@ -1,0 +1,55 @@
+name: Host API Drift Check
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream host_api.h
+        run: |
+          set -euo pipefail
+          if ! curl -L --fail -o upstream_host_api.h \
+              "https://raw.githubusercontent.com/krim404/cdc-badge-os/release/components/plugin_manager/include/plugin_manager/host_api.h"; then
+            echo "Upstream not yet present, skipping"
+            exit 0
+          fi
+
+      - name: Compare
+        id: diff
+        run: |
+          set +e
+          if [ ! -f upstream_host_api.h ]; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! diff -u sdk/host_api.h upstream_host_api.h > /tmp/diff.txt; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+            head -200 /tmp/diff.txt
+          else
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open drift issue
+        if: steps.diff.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh issue list --label "host-api-drift" --state open --json number | grep -q '"number"'; then
+            echo "Open drift issue already exists"
+            exit 0
+          fi
+          gh issue create \
+            --title "host_api.h drift detected against cdc-badge-os" \
+            --label "host-api-drift" \
+            --body "The canonical sdk/host_api.h in this repo has drifted from the upstream firmware header in cdc-badge-os. See workflow run for the diff. Reconcile manually and update both repos."

@@ -1,0 +1,35 @@
+{
+  "id": "news_feed",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "info",
+  "host_api_level_min": "0.5",
+  "linear_memory_kb": 128,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": { "en": "News Feed" },
+      "description": { "en": "Headlines from an Atom RSS feed." }
+    },
+    "strings": {
+      "loading":       { "en": "Loading..." },
+      "fetch_failed":  { "en": "(fetch failed)" },
+      "parse_failed":  { "en": "(parse failed)" },
+      "no_entries":    { "en": "(no entries)" },
+      "feed_url":      { "en": "Feed URL" },
+      "hint_main":     { "en": "[Y] Read [1] Reload [3] URL [N] Back" }
+    }
+  },
+  "capabilities": {
+    "wifi": true,
+    "http": true,
+    "ui_exclusive": true,
+    "nvs_namespace": "plg_news_feed"
+  },
+  "prerequisites": {
+    "wifi_connected": {
+      "timeout_ms": 15000,
+      "on_fail": "abort"
+    }
+  }
+}

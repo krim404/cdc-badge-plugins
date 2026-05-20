@@ -1,0 +1,19 @@
+[package]
+name = "cdc-badge-plugin"
+version = "0.5.0"
+edition = "2021"
+description = "Safe Rust bindings for the CDC Badge OS WASM plugin host API"
+license = "GPL-3.0"
+repository = "https://github.com/krim404/cdc-badge-plugins"
+readme = "README.md"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["allocator"]
+panic_handler = []
+allocator = ["dep:dlmalloc"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = { version = "0.2", default-features = false, features = ["global"], optional = true }

@@ -1,0 +1,24 @@
+{
+  "id": "battery_widget",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "battery",
+  "host_api_level_min": "0.5",
+  "linear_memory_kb": 64,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": {
+        "en": "Battery Widget"
+      },
+      "description": {
+        "en": "Shows live battery state from the host Power API."
+      }
+    },
+    "strings": {}
+  },
+  "capabilities": {
+    "ui_exclusive": false
+  },
+  "prerequisites": {}
+}
