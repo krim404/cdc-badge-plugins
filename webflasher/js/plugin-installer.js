@@ -60,7 +60,8 @@ function renderCatalog(catalog) {
 
     const meta = document.createElement("div");
     meta.className = "plugin-meta";
-    meta.textContent = `v${p.version} - ${p.linear_memory_kb} KB - by ${p.author || "unknown"}`;
+    const sizeKb = p.wasm_size_kb ?? p.linear_memory_kb;
+    meta.textContent = `v${p.version} - ${sizeKb} KB - by ${p.author || "unknown"}`;
 
     const progress = document.createElement("div");
     progress.className = "progress";

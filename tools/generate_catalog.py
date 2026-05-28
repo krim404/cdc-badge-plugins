@@ -23,7 +23,8 @@ def english(field) -> str:
     return str(field)
 
 
-def build_catalog(repo_root: Path, release_base_url: str, version: str) -> dict:
+def build_catalog(repo_root: Path, release_base_url: str, version: str,
+                  dist_dir: Path) -> dict:
     plugin_dirs: list[Path] = []
     for top in ("examples", "plugins"):
         top_dir = repo_root / top
@@ -43,6 +44,10 @@ def build_catalog(repo_root: Path, release_base_url: str, version: str) -> dict:
             raise SystemExit(f"duplicate plugin id '{plugin_id}' across examples/ and plugins/")
         seen_ids.add(plugin_id)
         i18n_meta = manifest.get("i18n", {}).get("meta", {})
+        wasm_path = dist_dir / f"{plugin_id}.wasm"
+        wasm_size_kb = None
+        if wasm_path.is_file():
+            wasm_size_kb = (wasm_path.stat().st_size + 1023) // 1024
         entry = {
             "id": plugin_id,
             "version": manifest.get("version", "0.0.0"),
@@ -57,6 +62,8 @@ def build_catalog(repo_root: Path, release_base_url: str, version: str) -> dict:
             "wasm_url": f"{release_base_url}/{plugin_id}.wasm",
             "meta_url": f"{release_base_url}/{plugin_id}.meta.json",
         }
+        if wasm_size_kb is not None:
+            entry["wasm_size_kb"] = wasm_size_kb
         lang_path = plugin_dir / f"{plugin_id}.lang.json"
         if lang_path.is_file():
             entry["lang_url"] = f"{release_base_url}/{plugin_id}.lang.json"
@@ -79,10 +86,15 @@ def main() -> int:
                         help="Release version string written into the catalog")
     parser.add_argument("--out", default="catalog.json",
                         help="Output file path (default: catalog.json)")
+    parser.add_argument("--dist", default="dist",
+                        help="Directory holding built <id>.wasm files (default: dist)")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
-    catalog = build_catalog(repo_root, args.release_base_url.rstrip("/"), args.version)
+    dist_dir = (repo_root / args.dist).resolve() if not Path(args.dist).is_absolute() \
+        else Path(args.dist).resolve()
+    catalog = build_catalog(repo_root, args.release_base_url.rstrip("/"),
+                            args.version, dist_dir)
 
     out_path = Path(args.out)
     out_path.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
