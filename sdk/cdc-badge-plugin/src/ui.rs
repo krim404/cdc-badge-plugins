@@ -9,7 +9,60 @@
 
 use crate::ffi::{self, UiItem};
 use alloc::ffi::CString;
+use alloc::vec;
 use alloc::vec::Vec;
+
+/// \brief Target codepage for `to_display_with()`. Mirrors HOST_STR_TARGET_*.
+pub use ffi::{HOST_STR_TARGET_CP437, HOST_STR_TARGET_LATIN1};
+
+/// \brief Convert a UTF-8/HTML web string into single-byte display
+///        characters in the codepage of the \p target font.
+///
+/// Decodes HTML named/numeric entities and collapses UTF-8 multibyte
+/// sequences into the single-byte layout the chosen font expects.
+/// Unknown codepoints are dropped. The returned buffer has no trailing
+/// NUL; pass it (or its `.as_slice()`) to any push helper that accepts
+/// `impl AsRef<[u8]>`.
+/// \param input  Source string from the web (RSS, JSON, HA API, ...).
+/// \param target One of `HOST_STR_TARGET_CP437` (default for the
+///               GFX builtin glcdfont) or `HOST_STR_TARGET_LATIN1`
+///               (FreeMonoBold*pt8b fonts).
+pub fn to_display_with(input: &str, target: u32) -> Vec<u8> {
+    let in_c = match CString::new(input.as_bytes()) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let cap = input.len() + 32;
+    let mut buf: Vec<u8> = vec![0u8; cap];
+    let rc = unsafe {
+        ffi::host_str_to_display(
+            in_c.as_ptr(),
+            buf.as_mut_ptr() as *mut _,
+            cap,
+            target,
+        )
+    };
+    if rc != 0 {
+        return Vec::new();
+    }
+    let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    buf.truncate(nul);
+    buf
+}
+
+/// \brief Convenience wrapper: `to_display_with(input, HOST_STR_TARGET_CP437)`.
+///
+/// Use this whenever you hand text to a plugin push helper - those views
+/// render with the GFX builtin glcdfont after the splash so CP437 is the
+/// right codepage. For the FreeMonoBold*pt8b fonts call
+/// `to_display_with(s, HOST_STR_TARGET_LATIN1)` instead.
+pub fn to_display(input: &str) -> Vec<u8> {
+    to_display_with(input, HOST_STR_TARGET_CP437)
+}
+
+fn to_cstring<L: AsRef<[u8]>>(label: L) -> Option<CString> {
+    CString::new(label.as_ref().to_vec()).ok()
+}
 
 pub use ffi::{
     UI_ICON_ALERT, UI_ICON_ANGLE, UI_ICON_ARROW_DOWN, UI_ICON_ARROW_LEFT,
@@ -28,8 +81,8 @@ pub use ffi::{
 /// \param text     Toast body text.
 /// \param icon     One of the `UI_ICON_*` constants.
 /// \param duration_ms How long the toast stays on screen.
-pub fn push_toast(text: &str, icon: u8, duration_ms: u16) {
-    if let Ok(c) = CString::new(text) {
+pub fn push_toast<T: AsRef<[u8]>>(text: T, icon: u8, duration_ms: u16) {
+    if let Some(c) = to_cstring(text) {
         unsafe {
             ffi::host_ui_push_toast(c.as_ptr(), icon, duration_ms);
         }
@@ -40,8 +93,8 @@ pub fn push_toast(text: &str, icon: u8, duration_ms: u16) {
 /// \param text     Message body, may contain newlines.
 /// \param icon     One of the `UI_ICON_*` constants.
 /// \param duration_ms How long the view stays on screen.
-pub fn push_message(text: &str, icon: u8, duration_ms: u32) {
-    if let Ok(c) = CString::new(text) {
+pub fn push_message<T: AsRef<[u8]>>(text: T, icon: u8, duration_ms: u32) {
+    if let Some(c) = to_cstring(text) {
         unsafe {
             ffi::host_ui_push_message(c.as_ptr(), icon, duration_ms);
         }
@@ -55,8 +108,8 @@ pub fn push_message(text: &str, icon: u8, duration_ms: u32) {
 /// \param text     Prompt text.
 /// \param icon     One of the `UI_ICON_*` constants.
 /// \param action_id Action id echoed back to the plugin on user response.
-pub fn push_confirm(text: &str, icon: u8, action_id: u32) {
-    if let Ok(c) = CString::new(text) {
+pub fn push_confirm<T: AsRef<[u8]>>(text: T, icon: u8, action_id: u32) {
+    if let Some(c) = to_cstring(text) {
         unsafe {
             ffi::host_ui_push_confirm(c.as_ptr(), icon, action_id);
         }
@@ -66,14 +119,14 @@ pub fn push_confirm(text: &str, icon: u8, action_id: u32) {
 /// \brief Show a modal info screen with title and multi-line body.
 /// \param title    Header text shown at the top of the view.
 /// \param body     Body text, may contain newlines.
-pub fn push_info(title: &str, body: &str) {
-    let t = match CString::new(title) {
-        Ok(c) => c,
-        Err(_) => return,
+pub fn push_info<T: AsRef<[u8]>, B: AsRef<[u8]>>(title: T, body: B) {
+    let t = match to_cstring(title) {
+        Some(c) => c,
+        None => return,
     };
-    let b = match CString::new(body) {
-        Ok(c) => c,
-        Err(_) => return,
+    let b = match to_cstring(body) {
+        Some(c) => c,
+        None => return,
     };
     unsafe {
         ffi::host_ui_push_info(t.as_ptr(), b.as_ptr());
@@ -96,9 +149,9 @@ pub struct ListBuilder {
 impl ListBuilder {
     /// \brief Start a new list with the given title.
     /// \param title List header text.
-    pub fn new(title: &str) -> Self {
+    pub fn new<T: AsRef<[u8]>>(title: T) -> Self {
         Self {
-            title: CString::new(title).unwrap_or_default(),
+            title: to_cstring(title).unwrap_or_default(),
             labels: Vec::new(),
             items: Vec::new(),
             select_action: 0,
@@ -128,8 +181,8 @@ impl ListBuilder {
     /// \param label   Display label.
     /// \param item_id Plugin-defined id echoed back via `_user_data`.
     /// \param icon    One of the `UI_ICON_*` constants.
-    pub fn item(mut self, label: &str, item_id: u32, icon: u8) -> Self {
-        if let Ok(c) = CString::new(label) {
+    pub fn item<L: AsRef<[u8]>>(mut self, label: L, item_id: u32, icon: u8) -> Self {
+        if let Some(c) = to_cstring(label) {
             self.labels.push(c);
             let label_ptr = self.labels.last().unwrap().as_ptr();
             self.items.push(UiItem {
@@ -184,8 +237,8 @@ pub fn pop() {
 ///
 /// Works for any plugin-pushed view (list, confirm, t9, pin, slider, date,
 /// time). Pass an empty string to fall back to the view's default hint.
-pub fn set_footer(text: &str) {
-    if let Ok(c) = CString::new(text) {
+pub fn set_footer<T: AsRef<[u8]>>(text: T) {
+    if let Some(c) = to_cstring(text) {
         unsafe {
             ffi::host_ui_set_view_footer(c.as_ptr());
         }
@@ -194,8 +247,8 @@ pub fn set_footer(text: &str) {
 
 /// \brief Set the placeholder text shown in a plugin-pushed list when it
 ///        is empty. Pass an empty string to clear the override.
-pub fn set_list_empty(text: &str) {
-    if let Ok(c) = CString::new(text) {
+pub fn set_list_empty<T: AsRef<[u8]>>(text: T) {
+    if let Some(c) = to_cstring(text) {
         unsafe {
             ffi::host_ui_set_view_empty(c.as_ptr());
         }
@@ -229,8 +282,8 @@ impl ContextMenuBuilder {
         self
     }
 
-    pub fn item(mut self, label: &str, item_id: u32, icon: u8) -> Self {
-        if let Ok(c) = CString::new(label) {
+    pub fn item<L: AsRef<[u8]>>(mut self, label: L, item_id: u32, icon: u8) -> Self {
+        if let Some(c) = to_cstring(label) {
             self.labels.push(c);
             let label_ptr = self.labels.last().unwrap().as_ptr();
             self.items.push(UiItem {

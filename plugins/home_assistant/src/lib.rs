@@ -214,8 +214,8 @@ impl Entity {
         }
     }
 
-    fn label(&self) -> String {
-        match self.domain {
+    fn label(&self) -> Vec<u8> {
+        let s = match self.domain {
             Domain::Sensor | Domain::BinarySensor => {
                 if self.unit.is_empty() {
                     format!("{}: {}", self.name, self.state)
@@ -235,7 +235,8 @@ impl Entity {
                 let glyph = self.domain.state_glyph(&self.state);
                 format!("{} {}", glyph, self.name)
             }
-        }
+        };
+        ui::to_display(&s)
     }
 }
 

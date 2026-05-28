@@ -755,6 +755,46 @@ int host_view_canvas_clear         (void);
 /// \brief Set text size multiplier (Adafruit-GFX semantics).
 int host_view_canvas_set_text_size (uint8_t size);
 
+#define HOST_FONT_BUILTIN   0  ///< Adafruit-GFX 6x8; CP437 codepoints for umlauts.
+#define HOST_FONT_BOLD_9PT  1  ///< FreeMonoBold 9pt; Latin-1 indexed.
+#define HOST_FONT_BOLD_12PT 2  ///< FreeMonoBold 12pt; Latin-1 indexed.
+#define HOST_FONT_BOLD_18PT 3  ///< FreeMonoBold 18pt; ASCII only.
+#define HOST_FONT_BOLD_24PT 4  ///< FreeMonoBold 24pt; ASCII only.
+#define HOST_FONT_COUNT     5  ///< Number of defined font ids.
+
+/**
+ * \brief Switch the canvas font to one of the canonical HOST_FONT_* ids.
+ *
+ * Persists across draw calls until the next \ref host_view_canvas_clear or
+ * a further set_font call. The 8b custom fonts (HOST_FONT_BOLD_9PT/12PT)
+ * are Latin-1 indexed; pass Latin-1 bytes if you need umlauts. The builtin
+ * 6x8 font (HOST_FONT_BUILTIN) holds umlauts at their CP437 codepoints.
+ *
+ * \param font_id One of HOST_FONT_*.
+ * \return HOST_OK on success, HOST_ERR_INVALID_ARG for out-of-range ids.
+ */
+int host_view_canvas_set_font      (uint8_t font_id);
+
+/**
+ * \brief Pick the largest HOST_FONT_* whose rendered \p text fits within
+ *        \p max_width_px. Candidates are evaluated in array order; sort
+ *        them from largest to smallest. Falls back to the last entry when
+ *        nothing fits.
+ *
+ * Pure measurement; does not change canvas state. Pair with
+ * \ref host_view_canvas_set_font to apply the picked font.
+ *
+ * \param text Null-terminated string to measure.
+ * \param max_width_px Pixel budget.
+ * \param candidates Array of HOST_FONT_* ids.
+ * \param count Number of entries in \p candidates.
+ * \param out_font_id Receives the chosen font id.
+ * \return HOST_OK on success, HOST_ERR_INVALID_ARG for empty input.
+ */
+int host_text_pick_font_that_fits  (const char* text, int16_t max_width_px,
+                                    const uint8_t* candidates, uint32_t count,
+                                    uint8_t* out_font_id);
+
 /// \brief Switch between normal and inverted (white on black) text.
 int host_view_canvas_set_text_color(bool inverted);
 
@@ -998,6 +1038,43 @@ int  host_get_firmware_version  (char* out, size_t out_size);
 
 /// \brief Copy the build profile name (e.g. "release", "debug") into `out`.
 int  host_get_build_profile     (char* out, size_t out_size);
+
+/** \} */
+
+/**
+ * \defgroup strings Strings (Display normalisation)
+ * \brief Convert web payloads into single-byte display characters.
+ *
+ * Different display fonts use different codepage layouts:
+ *   - The GFX builtin glcdfont (active after `setFont(nullptr)`) uses
+ *     CP437 - umlauts sit at 0x84/0x94/0x81 (a/o/u), 0xE1 (sz).
+ *   - The FreeMonoBold*pt8b fonts use Latin-1 - the same umlauts sit at
+ *     0xE4/0xF6/0xFC/0xDF.
+ *
+ * Plugins call this on data sourced from the web (RSS bodies, REST JSON,
+ * HA entity names) before handing it to a UI push function. The
+ * `target` parameter picks the right codepage for the rendering context.
+ * Calling it on already-normalised strings is harmless.
+ * \{
+ */
+
+/// Target codepage for host_str_to_display().
+#define HOST_STR_TARGET_CP437   0  /* GFX builtin glcdfont (default after splash) */
+#define HOST_STR_TARGET_LATIN1  1  /* FreeMonoBold*pt8b fonts (Latin-1 indexed)   */
+
+/// \brief Decode HTML entities + UTF-8 in `in` into single-byte display
+///        characters in `out`.
+///
+/// `target` selects the output codepage so the result is valid for the
+/// active GFX font without further conversion. Unknown codepoints are
+/// dropped. Truncates if the result would exceed `out_size - 1` bytes.
+/// Output is always NUL-terminated.
+/// \param in       Source string (UTF-8 with optional HTML entities).
+/// \param out      Destination buffer.
+/// \param out_size Capacity of `out` in bytes (including the NUL).
+/// \param target   One of HOST_STR_TARGET_*.
+/// \return HOST_OK on success, HOST_ERR_INVALID_ARG when inputs are NULL or `out_size==0`.
+int host_str_to_display(const char* in, char* out, size_t out_size, uint32_t target);
 
 /** \} */
 

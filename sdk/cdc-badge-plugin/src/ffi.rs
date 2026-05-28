@@ -144,4 +144,16 @@ extern "C" {
     pub fn host_event_subscribe(event_mask: u32, action_id: u32) -> c_int;
     pub fn host_event_unsubscribe(subscription_id: u32) -> c_int;
     pub fn host_event_publish(module_event_subtype: u32, value: u32) -> c_int;
+
+    // Strings
+    pub fn host_str_to_display(
+        input: *const c_char,
+        out: *mut c_char,
+        out_size: usize,
+        target: u32,
+    ) -> c_int;
 }
+
+/// Target codepage for host_str_to_display().
+pub const HOST_STR_TARGET_CP437: u32 = 0;
+pub const HOST_STR_TARGET_LATIN1: u32 = 1;

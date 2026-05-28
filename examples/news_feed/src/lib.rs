@@ -118,7 +118,12 @@ impl<T> core::ops::Deref for PluginCell<T> {
 // The two pieces of state. `HEADLINES` is the cached list shown on
 // screen; `CURRENT_URL` is what we last fetched, used to prefill the
 // T9 editor when the user wants to change it.
-static HEADLINES: PluginCell<Vec<String>> = PluginCell::new(Vec::new());
+struct Entry {
+    title: Vec<u8>,
+    summary: Vec<u8>,
+}
+
+static HEADLINES: PluginCell<Vec<Entry>> = PluginCell::new(Vec::new());
 static CURRENT_URL: PluginCell<String> = PluginCell::new(String::new());
 
 /// \brief Read the user-configured feed URL from NVS, or fall back to the
@@ -135,72 +140,65 @@ fn current_url() -> String {
         .unwrap_or_else(|| DEFAULT_URL.to_string())
 }
 
-/// \brief Decode the five XML entities that commonly appear in Atom title
-///        text.
-/// \param input Raw title text.
-/// \return Title text with `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`
-///         replaced by their literal characters.
-//
-// Note the order: `&amp;` must come *first*. If we decoded `&lt;` to
-// `<` first and then `&amp;` to `&`, a literal "&amp;lt;" in the source
-// would wrongly become "<" instead of staying as "&lt;". Doing `&amp;`
-// first means each replacement step only operates on already-decoded
-// text. This is a classic XML/HTML decoding gotcha.
-fn decode_entities(input: &str) -> String {
-    input
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
+/// \brief Strip simple inline tags (`<p>`, `<br>`, `<a href=..>...`) from a
+///        snippet so the body fits the badge info view.
+fn strip_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    let mut last_space = true;
+    for ch in input.chars() {
+        if in_tag {
+            if ch == '>' { in_tag = false; }
+            continue;
+        }
+        if ch == '<' { in_tag = true; continue; }
+        if ch.is_whitespace() {
+            if !last_space {
+                out.push(' ');
+                last_space = true;
+            }
+        } else {
+            out.push(ch);
+            last_space = false;
+        }
+    }
+    out.trim().to_string()
 }
 
-/// \brief Extract the first `<title>` payload from one Atom `<entry>`.
-///
-/// Strips an optional `<![CDATA[...]]>` wrapper, decodes the common XML
-/// entities and trims whitespace.
-/// \param entry Slice of XML covering exactly one `<entry>...</entry>`.
-/// \return The decoded title, or `None` if no usable title is found.
-//
-// We intentionally do *not* pull in a real XML parser: it would cost
-// tens of KB of code size and we only need a tiny subset of the format.
-// The trade-off is that this function is fragile if the feed deviates
-// from the shape we expect (e.g. mixed `<title>` and `<title type="..">`
-// orderings); the unit tests at the bottom of the file pin the few
-// shapes we *do* handle.
-fn extract_first_title(entry: &str) -> Option<String> {
-    // Find `<title` (without the closing `>` so we still match attributes
-    // such as `<title type="text">`). The `?` operator returns `None`
-    // from the whole function if the search fails, which is the right
-    // behaviour for "no title here, skip this entry".
-    let tag = entry.find("<title")?;
+/// \brief Pull the first `<tag>...</tag>` payload (CDATA-aware, attribute-tolerant)
+///        from \p src. Returns `None` when not found.
+fn extract_tag<'a>(src: &'a str, tag: &str) -> Option<&'a str> {
+    let open = src.find(&format!("<{}", tag))?;
+    let after_tag = src[open..].find('>')? + open + 1;
+    let close = src[after_tag..].find(&format!("</{}>", tag))? + after_tag;
+    Some(src[after_tag..close].trim())
+}
 
-    // Index of the character right after the opening tag's `>`. We add
-    // `tag` and `+1` because `find` returned an offset into a slice that
-    // started at `tag`.
-    let after_tag = entry[tag..].find('>')? + tag + 1;
-
-    // Offset of `</title>` from the start of the entry slice.
-    let close = entry[after_tag..].find("</title>")? + after_tag;
-
-    // Inner text, trimmed of surrounding whitespace.
-    let raw = entry[after_tag..close].trim();
-
-    // Strip a CDATA wrapper if present. CDATA is the XML escape hatch
-    // for content that contains literal `<`, `>` or `&`.
-    let inner = if raw.starts_with("<![CDATA[") && raw.ends_with("]]>") {
-        &raw["<![CDATA[".len()..raw.len() - 3]
+/// \brief Strip a CDATA wrapper if present.
+fn strip_cdata(s: &str) -> &str {
+    if s.starts_with("<![CDATA[") && s.ends_with("]]>") {
+        &s["<![CDATA[".len()..s.len() - 3]
     } else {
-        raw
-    };
-
-    // Decode the common entities and discard whitespace-only titles.
-    let decoded = decode_entities(inner.trim());
-    if decoded.is_empty() {
-        None
-    } else {
-        Some(decoded)
+        s
     }
+}
+
+/// \brief Extract title + summary from one Atom `<entry>` or RSS `<item>` block.
+/// \return `None` if the title is missing or empty.
+fn extract_first_entry(entry: &str) -> Option<Entry> {
+    let title_raw = strip_cdata(extract_tag(entry, "title")?).trim();
+    if title_raw.is_empty() { return None; }
+    let summary_raw = extract_tag(entry, "summary")
+        .or_else(|| extract_tag(entry, "description"))
+        .or_else(|| extract_tag(entry, "content"))
+        .map(strip_cdata)
+        .map(|s| s.trim())
+        .unwrap_or("");
+    let title_dec = ui::to_display(title_raw);
+    if title_dec.is_empty() { return None; }
+    let summary_plain = strip_html(summary_raw);
+    let summary_dec = ui::to_display(&summary_plain);
+    Some(Entry { title: title_dec, summary: summary_dec })
 }
 
 /// \brief Walk an Atom feed body and collect up to `max` entry titles.
@@ -214,37 +212,29 @@ fn extract_first_title(entry: &str) -> Option<String> {
 // Algorithm: repeatedly slice the body to "the next `<entry>...</entry>`
 // block", extract its title, advance the cursor past the closing tag,
 // and stop when we hit `max` or run out of entries.
-fn parse_atom_titles(body: &str, max: usize) -> Vec<String> {
-    let mut titles = Vec::new();
+fn parse_feed_entries(body: &str, max: usize) -> Vec<Entry> {
+    let mut entries = Vec::new();
+    let (open_tag, close_tag) = if body.contains("<entry") {
+        ("<entry", "</entry>")
+    } else {
+        ("<item", "</item>")
+    };
     let mut cursor = 0;
-    while titles.len() < max {
-        // Locate the start of the next `<entry`. `match` lets us either
-        // continue the loop with the found offset, or break out cleanly
-        // when there are no more entries.
-        let entry_start = match body[cursor..].find("<entry") {
+    while entries.len() < max {
+        let entry_start = match body[cursor..].find(open_tag) {
             Some(i) => cursor + i,
             None => break,
         };
-        // Locate the matching `</entry>`. A malformed feed without a
-        // closing tag would otherwise loop forever; the break here is
-        // the safety belt.
-        let entry_end = match body[entry_start..].find("</entry>") {
+        let entry_end = match body[entry_start..].find(close_tag) {
             Some(i) => entry_start + i,
             None => break,
         };
-
-        // Try to extract a title from this entry. `if let Some(t) = ...`
-        // is the idiomatic "do nothing if `None`" pattern.
-        if let Some(t) = extract_first_title(&body[entry_start..entry_end]) {
-            titles.push(t);
+        if let Some(e) = extract_first_entry(&body[entry_start..entry_end]) {
+            entries.push(e);
         }
-
-        // Move the cursor past the closing tag so the next iteration
-        // searches in the remaining body. Forgetting this would loop
-        // on the same entry forever - watch for this in your own loops.
-        cursor = entry_end + "</entry>".len();
+        cursor = entry_end + close_tag.len();
     }
-    titles
+    entries
 }
 
 /// \brief Issue a GET request and return the full response body.
@@ -315,7 +305,7 @@ fn fetch_and_render() {
     // Chain the fetch with the parse. `.map(...)` only runs the closure
     // if the previous step succeeded, so we end up with
     // `Result<Vec<String>, &str>` here.
-    let result = fetch_body(&url).map(|body| parse_atom_titles(&body, MAX_HEADLINES));
+    let result = fetch_body(&url).map(|body| parse_feed_entries(&body, MAX_HEADLINES));
 
     // Start a list view. `.on_select(...)` says "when the user picks an
     // item, fire this action ID". `.on_menu(...)` says "when the user
@@ -329,17 +319,11 @@ fn fetch_and_render() {
     // makes it impossible to accidentally render the wrong UI for one of
     // them.
     match result {
-        Ok(titles) if !titles.is_empty() => {
-            // Happy path: add one row per headline. The index is what
-            // `plugin_on_action` will receive as `idx` when the user
-            // selects a row, so we use it as our lookup key into the
-            // cached vector.
-            for (i, t) in titles.iter().enumerate() {
-                builder = builder.item(t, i as u32, ui::UI_ICON_NONE);
+        Ok(entries) if !entries.is_empty() => {
+            for (i, e) in entries.iter().enumerate() {
+                builder = builder.item(&e.title, i as u32, ui::UI_ICON_NONE);
             }
-            // Move the parsed titles into the global cache so the
-            // action handler can resolve `idx -> title`.
-            *HEADLINES.borrow_mut() = titles;
+            *HEADLINES.borrow_mut() = entries;
         }
         Ok(_) => {
             // Feed parsed but contained no entries. Show a single info
@@ -430,11 +414,20 @@ pub extern "C" fn plugin_on_exit() -> i32 {
 pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> i32 {
     match action_id {
         ACTION_VIEW_TITLE => {
-            // User picked one of the headline rows. Look up the title
-            // by index. `.cloned()` makes an owned `String` so we can
-            // drop the borrow on `HEADLINES` before pushing the modal.
-            if let Some(title) = HEADLINES.borrow().get(idx as usize).cloned() {
-                ui::push_info(i18n::tr_meta("name"), &title);
+            let entries = HEADLINES.borrow();
+            if let Some(e) = entries.get(idx as usize) {
+                let body: Vec<u8> = if e.summary.is_empty() {
+                    e.title.clone()
+                } else {
+                    let mut b = Vec::with_capacity(e.title.len() + 2 + e.summary.len());
+                    b.extend_from_slice(&e.title);
+                    b.extend_from_slice(b"\n\n");
+                    b.extend_from_slice(&e.summary);
+                    b
+                };
+                let title = ui::to_display(&i18n::tr_meta("name"));
+                drop(entries);
+                ui::push_info(&title, &body);
             }
         }
         ACTION_EDIT_URL => {
@@ -501,36 +494,23 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Bring the `vec!` macro into scope for native test builds. It lives
-    // in `alloc` (not `core`) and has to be imported explicitly in
-    // `no_std` crates - the crate-root `extern crate alloc` only makes
-    // the *crate* visible, not its macros.
-    use alloc::vec;
-
-    // A minimal feed with two `<entry>` blocks and a feed-level title
-    // we expect the parser to ignore. The `&amp;` and the CDATA wrapper
-    // exercise the decoder paths in `extract_first_title`.
-    const SAMPLE: &str = "<?xml version=\"1.0\"?><feed xmlns=\"http://www.w3.org/2005/Atom\">\
-<title>Feed level — ignored</title>\
-<entry><title>First &amp; only</title></entry>\
-<entry><title type=\"text\"><![CDATA[Second one]]></title></entry>\
-</feed>";
 
     #[test]
-    fn skips_feed_level_title_and_decodes() {
-        // We expect two titles back: the feed-level `<title>` is not
-        // inside an `<entry>`, so the parser skips it; the entry-level
-        // titles are decoded (`&amp;` -> `&`) and unwrapped from CDATA.
-        let titles = parse_atom_titles(SAMPLE, 10);
-        assert_eq!(titles, vec!["First & only", "Second one"]);
+    fn extract_tag_basic() {
+        assert_eq!(extract_tag("<entry><title>hi</title></entry>", "title"), Some("hi"));
+        assert_eq!(extract_tag("<title type=\"text\">attr</title>", "title"), Some("attr"));
+        assert_eq!(extract_tag("<entry></entry>", "title"), None);
     }
 
     #[test]
-    fn respects_max_cap() {
-        // Build a feed with 20 trivial entries and ask for at most 10:
-        // the loop in `parse_atom_titles` must stop at the cap.
-        let many = "<entry><title>x</title></entry>".repeat(20);
-        let titles = parse_atom_titles(&many, 10);
-        assert_eq!(titles.len(), 10);
+    fn strip_cdata_unwraps() {
+        assert_eq!(strip_cdata("<![CDATA[hello]]>"), "hello");
+        assert_eq!(strip_cdata("plain"), "plain");
+    }
+
+    #[test]
+    fn strip_html_removes_tags_and_collapses_whitespace() {
+        let out = strip_html("<p>hello <b>world</b>\n   foo</p>");
+        assert_eq!(out, "hello world foo");
     }
 }
