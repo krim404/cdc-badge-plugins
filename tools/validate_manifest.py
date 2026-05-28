@@ -63,6 +63,16 @@ def validate(path: Path) -> None:
         if name not in KNOWN_CAPABILITIES:
             fail(path, f"unknown capability '{name}'")
 
+    ns = manifest.get("capabilities", {}).get("nvs_namespace")
+    if ns is not None:
+        if len(ns) > 15:
+            fail(path, f"nvs_namespace '{ns}' exceeds 15 chars (NVS hard limit)")
+        if not (ns.startswith("plg_") or ns.startswith("plugin_")):
+            fail(path, f"nvs_namespace '{ns}' must start with 'plg_' or 'plugin_' "
+                       f"to isolate plugin storage from system NVS (wifi creds, etc.)")
+        if not all(c.islower() or c.isdigit() or c == "_" for c in ns):
+            fail(path, f"nvs_namespace '{ns}' must be [a-z0-9_] only")
+
     i18n = manifest.get("i18n", {})
     meta = i18n.get("meta", {})
     if "name" not in meta:

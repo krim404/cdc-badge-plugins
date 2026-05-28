@@ -51,10 +51,21 @@ Plugin code looks them up with `host_i18n_tr_key("save")` or `host_i18n_tr_meta(
 ```
 
 `rmem` is a list of slot names (1-15 chars each). The host allocates a
-physical slot from the plugin pool on first write and persists the
-association in the slot header. Two plugins declaring the same name share
-the same physical slot (intentional, common scope). Calls to capabilities
-that were not declared return `HOST_ERR_NO_CAPABILITY`.
+physical slot from the plugin pool (TROPIC01 R-Mem slots 501-511) on first
+write and persists the association in the slot header. Two plugins
+declaring the same name share the same physical slot (intentional, common
+scope). Calls to capabilities that were not declared return
+`HOST_ERR_NO_CAPABILITY`. System slots (PIN hashes, FIDO2 keys, GPG keys,
+TOTP secrets, password vault) live outside the plugin pool and are not
+addressable from a plugin under any circumstance.
+
+`nvs_namespace` **must start with `plg_` or `plugin_`** (lowercase, digits
+and underscore only, 15-char NVS hard limit). The prefix is enforced both
+by the manifest validator and at runtime by the host so a plugin cannot
+declare a namespace like `nvs.net80211` and read the WiFi-credential
+`sta.pswd` out of system NVS, nor stomp on `wifi` / `display` / other
+firmware-owned namespaces. Pick `plg_<short>` when `plugin_<id>` overflows
+the 15-char budget (e.g. `plg_grove_led` instead of `plugin_grove_led`).
 
 ## prerequisites
 

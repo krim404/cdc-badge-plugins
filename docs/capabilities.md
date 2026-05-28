@@ -9,7 +9,7 @@ Capabilities answer the question **"what is this plugin allowed to do?"**. They 
 - `rmem` names are 1-15 chars (the on-chip name field holds 16 bytes incl. NUL)
 - ECC slots are not 0 (attestation) or 4 (CA)
 - BLE service UUIDs do not collide with another loaded plugin
-- `nvs_namespace` is unique among loaded plugins
+- `nvs_namespace` starts with `plg_` or `plugin_`, is `[a-z0-9_]` only, and is at most 15 chars. The prefix is mandatory: it isolates plugin NVS from system namespaces such as `nvs.net80211` (WiFi credentials), `wifi` or `display` so a plugin cannot read or overwrite them
 
 ## Runtime enforcement
 
