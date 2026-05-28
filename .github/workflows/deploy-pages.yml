@@ -31,6 +31,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -40,10 +42,15 @@ jobs:
         id: tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO_FULL: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG=$(gh api "repos/${REPO_FULL}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "v0.0.0-dev")
+          TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="v0.0.0-dev"
+          fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Build catalog
