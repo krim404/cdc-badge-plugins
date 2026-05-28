@@ -83,6 +83,23 @@ Upload to the badge with the Python tool from the firmware repo, or use the [web
 
 A plugin declares the minimum host API level it needs in its `meta.json`. The badge refuses to load plugins that need a higher minor than the firmware provides, or any other major.
 
+## Host API Reference
+
+The canonical contract between plugin and firmware is
+[`sdk/host_api.h`](sdk/host_api.h) - mirrored byte-identical from
+[the firmware repo's source](https://github.com/krim404/cdc-badge-os/blob/release/components/plugin_manager/include/plugin_manager/host_api.h)
+by a CI drift check. The Rust SDK auto-derives its constants from this file
+via `build.rs`, so there is one source of truth.
+
+Browsable HTML reference (rendered from `host_api.h` by Doxygen, refreshed on
+every firmware push):
+**https://krim404.github.io/cdc-badge-os/docs/host__api_8h.html**
+
+Start there to see every available host function with its `\brief`,
+parameters and return semantics, grouped by area (logging, time, power,
+crypto, secure element, HTTP, Wi-Fi, NVS, UI views, canvas, low-level GFX,
+i18n, events, keypad, USB, sysinfo, GPIO, pixel strip, BLE).
+
 ## Firmware build prerequisites
 
 Plugins built with recent Rust toolchains emit bulk-memory WASM ops (`memory.copy`, `memory.fill`). The firmware's WAMR runtime must be compiled with `WAMR_BUILD_BULK_MEMORY=1` (default in ESP-IDF setups) or plugins will fail to instantiate.
