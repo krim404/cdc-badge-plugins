@@ -12,8 +12,6 @@ on:
       - "Cargo.lock"
       - "tools/**"
       - ".github/workflows/deploy-pages.yml"
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
