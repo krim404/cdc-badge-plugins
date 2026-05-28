@@ -5,9 +5,12 @@ on:
     branches: [main, master]
     paths:
       - "webflasher/**"
-      - "examples/**/meta.json"
-      - "plugins/**/meta.json"
-      - "tools/generate_catalog.py"
+      - "examples/**"
+      - "plugins/**"
+      - "sdk/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "tools/**"
       - ".github/workflows/deploy-pages.yml"
   release:
     types: [published]
@@ -22,6 +25,9 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  BINARYEN_VERSION: version_119
+
 jobs:
   deploy:
     environment:
@@ -33,6 +39,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-opt
+        run: |
+          set -euo pipefail
+          curl -L "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar xz
+          sudo cp "binaryen-${BINARYEN_VERSION}/bin/wasm-opt" /usr/local/bin/
 
       - uses: actions/setup-python@v5
         with:
@@ -53,16 +69,22 @@ jobs:
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Build catalog
+      - name: Build all plugins
+        run: ./tools/build_all.sh
+
+      - name: Assemble Pages site
         env:
           TAG: ${{ steps.tag.outputs.tag }}
-          REPO_FULL: ${{ github.repository }}
         run: |
           set -euo pipefail
-          mkdir -p _site
+          mkdir -p _site/dist
           cp -r webflasher/* _site/
+          cp dist/*.wasm dist/*.meta.json _site/dist/
+          if compgen -G "dist/*.lang.json" > /dev/null; then
+            cp dist/*.lang.json _site/dist/
+          fi
           python3 tools/generate_catalog.py \
-            --release-base-url "https://github.com/${REPO_FULL}/releases/download/${TAG}" \
+            --release-base-url "./dist" \
             --version "${TAG}" \
             --out _site/catalog.json
 
