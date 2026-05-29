@@ -103,6 +103,9 @@ extern "C" {
     pub fn host_ui_consume_input_int(out: *mut i32) -> c_int;
     pub fn host_ui_consume_input_text(out: *mut c_char, out_size: usize) -> c_int;
 
+    // Plugin command channel
+    pub fn host_cmd_consume(out: *mut c_char, out_size: usize) -> c_int;
+
     // Canvas view
     pub fn host_view_canvas_push(title: *const c_char,
                                   key_action_id: u32,

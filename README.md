@@ -6,7 +6,7 @@ Plugins run inside a sandboxed WAMR runtime on the badge and interact with the f
 
 ## Status
 
-Pre-alpha. Host API Level `0.5`. Breaking changes between minor versions until `1.0`.
+Pre-alpha. Host API Level `0.6`. Breaking changes between minor versions until `1.0`.
 
 ## Repository Layout
 
@@ -79,7 +79,7 @@ Upload to the badge with the Python tool from the firmware repo, or use the [web
 
 | Firmware version | Host API Level |
 |------------------|----------------|
-| `0.6.x`          | `0.5`          |
+| `0.6.x`          | `0.6`          |
 
 A plugin declares the minimum host API level it needs in its `meta.json`. The badge refuses to load plugins that need a higher minor than the firmware provides, or any other major.
 

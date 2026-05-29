@@ -32,6 +32,7 @@ int plugin_on_action(uint32_t action_id, uint32_t selected_idx, uint32_t user_da
 int plugin_on_button(uint32_t button_code);
 int plugin_on_event (uint32_t event_type, uint32_t event_value);
 int plugin_on_tick  (uint64_t uptime_ms);
+int plugin_on_cmd   (uint32_t len);     /* host pushed a command; pull via host_cmd_consume */
 
 /* OPTIONAL - declare this export if any prerequisite uses on_fail=callback */
 int plugin_on_prerequisite_failed(uint32_t prereq_id, uint32_t error_code);

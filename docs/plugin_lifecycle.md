@@ -23,6 +23,7 @@ The Rust `plugin_main!()` macro generates the API-level exports for you.
 | `plugin_on_button(button_code)` | A keypad button is pressed while no host view is foreground. |
 | `plugin_on_event(event_type, value)` | A subscribed EventBus event arrives. |
 | `plugin_on_tick(uptime_ms)` | Periodic tick (~ once per second). |
+| `plugin_on_cmd(len)` | The host forwarded a command string (e.g. `PLUGIN CMD <id> <args>`); pull it with `cmd::consume` / `host_cmd_consume`. |
 | `plugin_on_prerequisite_failed(prereq_id, error_code)` | A prerequisite with `on_fail=callback` failed. |
 
 ## Prerequisite-controlled startup

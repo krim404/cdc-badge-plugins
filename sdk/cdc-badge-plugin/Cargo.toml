@@ -1,6 +1,6 @@
 [package]
 name = "cdc-badge-plugin"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "Safe Rust bindings for the CDC Badge OS WASM plugin host API"
 license = "GPL-3.0"

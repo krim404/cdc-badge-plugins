@@ -14,9 +14,10 @@ extern crate alloc;
 /// \brief Major part of the host API level this SDK targets.
 pub const HOST_API_LEVEL_MAJOR: u16 = 0;
 /// \brief Minor part of the host API level this SDK targets.
-pub const HOST_API_LEVEL_MINOR: u16 = 5;
+pub const HOST_API_LEVEL_MINOR: u16 = 6;
 
 pub mod canvas;
+pub mod cmd;
 pub mod event;
 pub mod ffi;
 pub mod gpio;

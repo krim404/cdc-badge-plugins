@@ -6,7 +6,7 @@ The canonical source of truth for the host API is [`sdk/host_api.h`](../sdk/host
 
 ```c
 #define HOST_API_LEVEL_MAJOR  0
-#define HOST_API_LEVEL_MINOR  5
+#define HOST_API_LEVEL_MINOR  6
 ```
 
 A plugin declares the minimum it needs in `meta.json`:
@@ -34,6 +34,7 @@ The host loads the plugin only if `plugin_major == host_major && plugin_minor <=
 - **EventBus** - subscribe, publish module events
 - **Keypad** - poll/consume, primary input comes through `plugin_on_button`
 - **System info** - feature flags, firmware version
+- **Command channel** - `host_cmd_consume` pulls a host-forwarded command string (paired with the optional `plugin_on_cmd` export)
 
 ## Return codes
 

@@ -26,8 +26,8 @@ extern "C" {
 /* ------------------------------------------------------------------------- */
 
 #define HOST_API_LEVEL_MAJOR  0
-#define HOST_API_LEVEL_MINOR  5
-#define HOST_API_LEVEL_STR    "0.5"
+#define HOST_API_LEVEL_MINOR  6
+#define HOST_API_LEVEL_STR    "0.6"
 #define HOST_API_LEVEL_PACKED (((uint32_t)HOST_API_LEVEL_MAJOR << 16) | HOST_API_LEVEL_MINOR)
 
 /* ------------------------------------------------------------------------- */
@@ -1038,6 +1038,25 @@ int  host_get_firmware_version  (char* out, size_t out_size);
 
 /// \brief Copy the build profile name (e.g. "release", "debug") into `out`.
 int  host_get_build_profile     (char* out, size_t out_size);
+
+/** \} */
+
+/**
+ * \defgroup cmd Plugin command channel
+ * \brief Receive a command string pushed to the plugin by the host.
+ *
+ * When the host forwards a command (e.g. via the `PLUGIN CMD <id> <args>`
+ * serial subcommand) it fires the optional \ref plugin_on_cmd export with the
+ * command length. The plugin pulls the bytes into its own buffer with
+ * \ref host_cmd_consume, mirroring \ref host_ui_consume_input_text.
+ * \{
+ */
+
+/// \brief Copy the pending command string into `out`, clearing it.
+/// \param out Caller buffer in plugin linear memory.
+/// \param out_size Size of `out`; the result is always null-terminated.
+/// \return Number of bytes copied, or a negative HOST_ERR_* code.
+int host_cmd_consume (char* out, size_t out_size);
 
 /** \} */
 

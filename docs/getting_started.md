@@ -9,7 +9,7 @@ This guide walks through writing, building, and installing your first plugin for
   rustup target add wasm32-unknown-unknown
   ```
 - Optional but recommended: [wasm-opt](https://github.com/WebAssembly/binaryen) to shrink the build.
-- A CDC Badge running firmware with host API level `0.5` or higher.
+- A CDC Badge running firmware with host API level `0.6` or higher.
 
 ## 2. Clone & build
 

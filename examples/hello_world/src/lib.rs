@@ -25,7 +25,7 @@ extern crate alloc;
 // API: `log` writes to the badge log, `ui` draws UI elements, and
 // `plugin_main` is the macro that wires up the WASM entry points the
 // firmware expects to find.
-use cdc_badge_plugin::{log, plugin_main, ui};
+use cdc_badge_plugin::{cmd, log, plugin_main, ui};
 
 // `plugin_main!()` expands into the small amount of boilerplate every
 // plugin needs (panic handler, global allocator, FFI shims). Forgetting
@@ -113,5 +113,23 @@ pub extern "C" fn plugin_on_enter() -> i32 {
 #[no_mangle]
 pub extern "C" fn plugin_on_exit() -> i32 {
     log::info(TAG, "exit");
+    0
+}
+
+/// \brief Optional hook fired when the host forwards a command string.
+/// \param len Length in bytes of the pending command.
+/// \return `0` on success.
+//
+// The firmware buffers the command and calls this export with its length.
+// The plugin pulls the bytes with `cmd::consume`, which copies them into a
+// plugin-owned buffer and clears the host-side pending slot. A plugin that
+// does not export `plugin_on_cmd` simply never receives commands; the
+// `PLUGIN CMD` serial subcommand then reports `ERR no_handler`.
+#[no_mangle]
+pub extern "C" fn plugin_on_cmd(len: u32) -> i32 {
+    match cmd::consume(len as usize) {
+        Some(command) => log::info(TAG, &alloc::format!("cmd: {}", command)),
+        None => log::warn(TAG, "cmd: empty"),
+    }
     0
 }
