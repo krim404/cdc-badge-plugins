@@ -1,0 +1,94 @@
+name: Build Plugins
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  BINARYEN_VERSION: version_119
+
+jobs:
+  build:
+    runs-on: codeberg-medium
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Rust (wasm32) and wasm-opt
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --target wasm32-unknown-unknown
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          curl -L "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar xz
+          sudo cp "binaryen-${BINARYEN_VERSION}/bin/wasm-opt" /usr/local/bin/
+
+      - name: Build all plugins
+        run: ./tools/build_all.sh
+
+      - name: Size check
+        run: |
+          set -euo pipefail
+          for w in dist/*.wasm; do
+            size=$(wc -c < "$w")
+            echo "$w: $size bytes"
+            if [ "$size" -gt 262144 ]; then
+              echo "$w exceeds 256 KB limit ($size bytes)"
+              exit 1
+            fi
+          done
+
+      - name: Get version info
+        id: version
+        env:
+          GIT_REF: ${{ github.ref }}
+        run: |
+          if [[ "$GIT_REF" == refs/tags/* ]]; then
+            VERSION="${GIT_REF#refs/tags/}"
+          else
+            VERSION="$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: https://code.forgejo.org/forgejo/upload-artifact@v4
+        with:
+          name: cdc-badge-plugins-${{ steps.version.outputs.version }}
+          path: dist/
+          retention-days: 90
+
+      - name: Create Codeberg release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TOKEN: ${{ forge.token }}
+          TAG: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          RID=$(curl -sS -H "Authorization: token $TOKEN" \
+            "$SERVER/api/v1/repos/$REPO/releases/tags/$TAG" | jq -r '.id // empty')
+          if [ -z "$RID" ]; then
+            RID=$(curl -fsS -X POST \
+              -H "Authorization: token $TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":false,\"prerelease\":false}" \
+              "$SERVER/api/v1/repos/$REPO/releases" | jq -r '.id')
+          fi
+          for f in dist/*.wasm dist/*.meta.json dist/*.lang.json; do
+            [ -e "$f" ] || continue
+            curl -fsS -X POST \
+              -H "Authorization: token $TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$f" \
+              "$SERVER/api/v1/repos/$REPO/releases/$RID/assets?name=$(basename "$f")"
+          done

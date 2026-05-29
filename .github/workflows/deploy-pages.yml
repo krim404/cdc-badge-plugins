@@ -2,16 +2,7 @@ name: Deploy GitHub Pages
 
 on:
   push:
-    branches: [main, master]
-    paths:
-      - "webflasher/**"
-      - "examples/**"
-      - "plugins/**"
-      - "sdk/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "tools/**"
-      - ".github/workflows/deploy-pages.yml"
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -52,18 +43,18 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Latest release tag
+      - name: Resolve version
         id: tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
-          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-            TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          fi
-          if [ -z "$TAG" ]; then
-            TAG="v0.0.0-dev"
+          if [[ "$GIT_REF" == refs/tags/* ]]; then
+            TAG="${GIT_REF#refs/tags/}"
+          else
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
+            [ -z "$TAG" ] || [ "$TAG" = "null" ] && TAG="v0.0.0-dev"
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 

@@ -1,0 +1,94 @@
+stages:
+  - build
+  - release
+  - deploy
+
+variables:
+  BINARYEN_VERSION: version_119
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+
+build:
+  stage: build
+  image: rust:latest
+  cache:
+    key: cargo
+    paths:
+      - .cargo/
+      - target/
+  before_script:
+    - rustup target add wasm32-unknown-unknown
+    - apt-get update && apt-get install -y --no-install-recommends python3 curl ca-certificates
+    - curl -L "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar xz
+    - cp "binaryen-${BINARYEN_VERSION}/bin/wasm-opt" /usr/local/bin/
+  script:
+    - ./tools/build_all.sh
+    - |
+      for w in dist/*.wasm; do
+        size=$(wc -c < "$w")
+        echo "$w: $size bytes"
+        if [ "$size" -gt 262144 ]; then
+          echo "ERROR: $w exceeds 256 KB limit ($size bytes)"
+          exit 1
+        fi
+      done
+  artifacts:
+    name: "cdc-badge-plugins-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/
+    expire_in: 90 days
+  rules:
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH =~ /^(main|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+release:
+  stage: release
+  image: curlimages/curl:latest
+  needs:
+    - job: build
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  script:
+    - |
+      set -e
+      base="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases"
+      art="${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/dist"
+      auth="JOB-TOKEN: ${CI_JOB_TOKEN}"
+      links=""
+      for f in dist/*.wasm dist/*.meta.json dist/*.lang.json; do
+        [ -e "$f" ] || continue
+        n=$(basename "$f")
+        links="${links}{\"name\":\"$n\",\"url\":\"${art}/$n?job=build\",\"link_type\":\"package\"},"
+      done
+      links="[${links%,}]"
+      payload="{\"name\":\"${CI_COMMIT_TAG}\",\"tag_name\":\"${CI_COMMIT_TAG}\",\"description\":\"CDC Badge Plugins ${CI_COMMIT_TAG}\",\"assets\":{\"links\":${links}}}"
+      code=$(curl -sS -o /tmp/rel.json -w "%{http_code}" --request POST --header "$auth" --header "Content-Type: application/json" --data "$payload" "$base")
+      echo "create release -> HTTP $code"
+      if [ "$code" = "409" ]; then
+        echo "release exists, updating metadata"
+        curl -sS --fail --request PUT --header "$auth" --header "Content-Type: application/json" \
+          --data "{\"name\":\"${CI_COMMIT_TAG}\",\"description\":\"CDC Badge Plugins ${CI_COMMIT_TAG}\"}" \
+          "$base/${CI_COMMIT_TAG}" > /dev/null
+      elif [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+        cat /tmp/rel.json
+        exit 1
+      fi
+
+pages:
+  stage: deploy
+  image: python:3.11
+  needs:
+    - job: build
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  script:
+    - mkdir -p public/dist
+    - cp -r webflasher/* public/
+    - cp dist/*.wasm dist/*.meta.json public/dist/
+    - if ls dist/*.lang.json >/dev/null 2>&1; then cp dist/*.lang.json public/dist/; fi
+    - python3 tools/generate_catalog.py --release-base-url "./dist" --version "${CI_COMMIT_TAG}" --out public/catalog.json
+  artifacts:
+    paths:
+      - public
