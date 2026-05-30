@@ -29,6 +29,7 @@ pub mod log;
 pub mod nvs;
 pub mod pixel_strip;
 pub mod power;
+pub mod random;
 pub mod rmem;
 pub mod time;
 pub mod ui;

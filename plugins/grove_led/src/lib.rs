@@ -64,6 +64,7 @@ enum Effect {
     Static = 1,
     Blink = 2,
     Breathing = 3,
+    Random = 4,
 }
 
 impl Effect {
@@ -72,6 +73,7 @@ impl Effect {
             1 => Effect::Static,
             2 => Effect::Blink,
             3 => Effect::Breathing,
+            4 => Effect::Random,
             _ => Effect::Rainbow,
         }
     }
@@ -151,6 +153,22 @@ fn load_state() {
 fn phase_divisor() -> u64 {
     let speed = s().speed.max(1) as u64;
     (102 - speed).max(2)
+}
+
+/// \brief Milliseconds between re-randomisations; faster speed shortens the
+///        interval.
+fn random_interval() -> u64 {
+    ((101 - s().speed as u64) * 6).max(1)
+}
+
+/// \brief xorshift64 step. `state` must be non-zero.
+fn xorshift64(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    x
 }
 
 fn clamp_count(v: u8) -> u8 {
@@ -249,6 +267,20 @@ fn render_frame(uptime_ms: u64) {
             for i in 0..max_idx { let _ = pixel_strip::set(i, rr, gg, bb); }
             for i in max_idx..strip_len { let _ = pixel_strip::set(i, 0, 0, 0); }
         }
+        Effect::Random => {
+            let mut rng = (uptime_ms / random_interval()) ^ 0x9E3779B97F4A7C15;
+            if rng == 0 { rng = 0x9E3779B97F4A7C15; }
+            for i in 0..max_idx {
+                let v = xorshift64(&mut rng);
+                let (rr, gg, bb) = if v & 0b11 == 0 {
+                    (0, 0, 0)
+                } else {
+                    hsv_to_rgb(((v >> 8) % 360) as u16, 255, brightness)
+                };
+                let _ = pixel_strip::set(i, rr, gg, bb);
+            }
+            for i in max_idx..strip_len { let _ = pixel_strip::set(i, 0, 0, 0); }
+        }
     }
     let _ = pixel_strip::refresh();
 }
@@ -303,6 +335,7 @@ fn show_effect_menu() {
         .item(i18n::tr_key("effect_static"),    1, ui::UI_ICON_CIRCLE)
         .item(i18n::tr_key("effect_blink"),     2, ui::UI_ICON_ALERT)
         .item(i18n::tr_key("effect_breathing"), 3, ui::UI_ICON_UPDOWN)
+        .item(i18n::tr_key("effect_random"),    4, ui::UI_ICON_ALERT)
         .push();
 }
 

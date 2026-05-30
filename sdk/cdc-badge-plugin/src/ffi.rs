@@ -148,6 +148,10 @@ extern "C" {
     pub fn host_event_unsubscribe(subscription_id: u32) -> c_int;
     pub fn host_event_publish(module_event_subtype: u32, value: u32) -> c_int;
 
+    // Crypto / RNG
+    pub fn host_random(buf: *mut u8, len: usize) -> c_int;
+    pub fn host_random_strict(buf: *mut u8, len: usize) -> c_int;
+
     // Strings
     pub fn host_str_to_display(
         input: *const c_char,

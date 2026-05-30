@@ -26,6 +26,7 @@
       "effect_static":    { "en": "Static" },
       "effect_blink":     { "en": "Blink" },
       "effect_breathing": { "en": "Breathing" },
+      "effect_random":    { "en": "Random" },
       "label_r": { "en": "Red" },
       "label_g": { "en": "Green" },
       "label_b": { "en": "Blue" },
