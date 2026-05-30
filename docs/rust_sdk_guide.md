@@ -46,6 +46,29 @@ pub extern "C" fn plugin_on_enter() -> i32 {
 | `nvs` | Per-plugin namespaced key/value. `get_blob/set_blob/get_str/set_str/get_u32/set_u32`. |
 | `i18n` | `i18n::tr_key(...)`, `i18n::current_language()` |
 | `event` | Subscribe to EventBus events with an action id. |
+| `ble` | GATT peripheral (publish a service with characteristics) and central (scan/connect/discover/read/write/subscribe). Inbound events fire an action id; pull the payload with the matching `consume_*`. Needs `ble: true`. |
+
+## Error handling
+
+Every fallible host call returns `cdc_badge_plugin::Result<T>`, i.e.
+`core::result::Result<T, cdc_badge_plugin::Error>`. `Error` is one enum across
+all modules, mapping the `HOST_ERR_*` codes (`InvalidArg`, `NoCapability`,
+`NotFound`, `Timeout`, `NoMemory`, `Busy`, `NotSupported`, `RmemFull`,
+`Generic`, and `Other(code)` for anything else). Use `?` to propagate:
+
+```rust
+use cdc_badge_plugin::{nvs, Result};
+
+fn save(count: u32) -> Result<()> {
+    nvs::set_u32("count", count)?;
+    Ok(())
+}
+```
+
+Pure lookups that may legitimately have no value still return `Option<T>`
+(`nvs::get_*`, `wifi::ssid`, `keypad::consume_next`, ...); infallible reads
+(`time::uptime_ms`, `power::battery_pct`, `display::width`, ...) return the
+value directly.
 
 ## Things to know
 

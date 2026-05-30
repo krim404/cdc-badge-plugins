@@ -6,13 +6,10 @@
 //! before `plugin_on_enter`. Use these only when a plugin needs to drop
 //! and re-acquire WiFi mid-session.
 
+use crate::{check, Error, Result};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_int;
-
-/// \brief Generic WiFi error returned by the helpers in this module.
-#[derive(Debug, Clone, Copy)]
-pub struct WifiError;
 
 /// \brief One access point from a completed scan.
 #[derive(Debug, Clone)]
@@ -35,14 +32,9 @@ struct WifiScanRaw {
 
 /// \brief Request the host to bring WiFi up.
 /// \param timeout_ms How long to wait for the connection in milliseconds.
-/// \return `Ok(())` on success, `Err(WifiError)` on timeout or failure.
-pub fn request(timeout_ms: u32) -> Result<(), WifiError> {
-    let rc = unsafe { host_wifi_request(timeout_ms) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(WifiError)
-    }
+/// \return `Ok(())` on success, `Err` on timeout or failure.
+pub fn request(timeout_ms: u32) -> Result<()> {
+    check(unsafe { host_wifi_request(timeout_ms) })
 }
 
 /// \brief Release the WiFi reservation taken with [`request`].
@@ -103,14 +95,9 @@ pub fn mac() -> Option<[u8; 6]> {
 }
 
 /// \brief Start an asynchronous WiFi scan.
-/// \return `Ok(())` on success, `Err(WifiError)` on failure.
-pub fn start_scan() -> Result<(), WifiError> {
-    let rc = unsafe { host_wifi_start_scan() };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(WifiError)
-    }
+/// \return `Ok(())` on success, `Err` on failure.
+pub fn start_scan() -> Result<()> {
+    check(unsafe { host_wifi_start_scan() })
 }
 
 /// \brief Whether the scan started by [`start_scan`] has finished.
@@ -120,8 +107,8 @@ pub fn scan_done() -> bool {
 
 /// \brief Read the results of the last completed scan.
 /// \param max Maximum number of access points to return.
-/// \return The discovered access points, or `Err(WifiError)` on failure.
-pub fn scan_results(max: usize) -> Result<Vec<ScanResult>, WifiError> {
+/// \return The discovered access points, or `Err` on failure.
+pub fn scan_results(max: usize) -> Result<Vec<ScanResult>> {
     let mut raw = Vec::<WifiScanRaw>::with_capacity(max);
     let mut count = max;
     let rc = unsafe {
@@ -129,7 +116,7 @@ pub fn scan_results(max: usize) -> Result<Vec<ScanResult>, WifiError> {
         host_wifi_scan_results(raw.as_mut_ptr(), &mut count)
     };
     if rc != 0 {
-        return Err(WifiError);
+        return Err(Error::from_code(rc));
     }
     raw.truncate(count);
     let out = raw

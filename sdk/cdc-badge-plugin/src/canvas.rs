@@ -12,7 +12,7 @@
 //!   `widget_action_id` with `idx = widget_id`, `user_data` one of
 //!   [`WIDGET_CHANGED`], [`WIDGET_COMMITTED`], [`WIDGET_CANCELLED`].
 
-use crate::ffi;
+use crate::{check, ffi, Result};
 use alloc::ffi::CString;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -82,9 +82,9 @@ pub fn set_text_size(size: u8) {
 ///
 /// Persists until the next [`clear`] or `set_font` call.
 /// \param font_id One of the `FONT_*` constants.
-/// \return `true` on success, `false` for an out-of-range id.
-pub fn set_font(font_id: u8) -> bool {
-    unsafe { ffi::host_view_canvas_set_font(font_id) == ffi::HOST_OK }
+/// \return `Ok(())` on success, `Err` for an out-of-range id.
+pub fn set_font(font_id: u8) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_set_font(font_id) })
 }
 
 /// \brief Pick the largest candidate font whose rendered `text` fits within

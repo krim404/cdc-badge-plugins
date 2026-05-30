@@ -22,10 +22,10 @@ KNOWN_PREREQUISITES = {
 }
 
 KNOWN_CAPABILITIES = {
-    "wifi", "ble", "http", "rmem", "ecc_slots", "ble_service_uuids",
-    "nvs_namespace", "display_lowlevel", "ui_exclusive",
+    "wifi", "ble", "http", "rmem", "ecc", "ble_service_uuids",
+    "nvs_namespace", "display_lowlevel", "ui_exclusive", "usb_cdc",
     "gpio_pins", "pwm_pins", "adc_pins", "i2c_bus", "sao", "grove",
-    "pixel_strip", "background",
+    "pixel_strip", "background", "prevent_sleep", "vfat",
 }
 
 

@@ -6,9 +6,10 @@ members = [
     "examples/battery_widget",
     "examples/grove_blink",
     "examples/news_feed",
-    "examples/sdk_probe",
     "plugins/home_assistant",
     "plugins/grove_led",
+    "plugins/sdk_probe",
+    "plugins/ble_scanner",
 ]
 exclude = [
     "sdk/plugin_template_rust",

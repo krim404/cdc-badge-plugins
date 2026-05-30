@@ -18,7 +18,8 @@ pub fn consume(max_len: usize) -> Option<alloc::string::String> {
         buf.set_len(cap);
         ffi::host_cmd_consume(buf.as_mut_ptr() as *mut core::ffi::c_char, cap)
     };
-    if rc < 0 {
+    // rc is the byte count; 0 means no command is pending.
+    if rc <= 0 {
         return None;
     }
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());

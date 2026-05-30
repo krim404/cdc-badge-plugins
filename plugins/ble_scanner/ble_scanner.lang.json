@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "translations": {
+    "de": {
+      "meta.name": "BLE-Scanner",
+      "meta.description": "Scannt durchgehend nach BLE-Geräten, nach RSSI sortiert mit Zähler je Gerät.",
+      "title": "BLE-Scanner",
+      "empty": "Suche...",
+      "disabled": "Bluetooth ist aus",
+      "seen": "Gesehen",
+      "rssi": "RSSI",
+      "type_pub": "öffentlich",
+      "type_rnd": "zufällig"
+    }
+  }
+}

@@ -22,8 +22,8 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::String;
 use cdc_badge_plugin::{
-    ble, crypto, display, event, gpio, http, i18n, i2c, keypad, lockscreen, log, nvs,
-    pixel_strip, plugin_main, power, random, rmem, sao, secure_element, sysinfo, time, ui, usb,
+    ble, canvas, cmd, crypto, display, event, fs, gpio, http, i18n, i2c, keypad, lockscreen, log,
+    nvs, pixel_strip, plugin_main, power, random, rmem, sao, secure_element, sysinfo, time, ui, usb,
     wifi,
 };
 
@@ -97,20 +97,24 @@ fn run_probe() {
     probe_random();
     probe_crypto();
     probe_nvs();
+    probe_fs();
     probe_rmem();
     probe_secure_element();
     probe_keypad();
     probe_gpio();
     probe_i2c();
     probe_sao();
+    probe_http();   // before WiFi: WiFi probing may drop the connection
     probe_wifi();
     probe_ble();
     probe_display();
+    probe_canvas();
     probe_pixel_strip();
     probe_usb();
     probe_event();
     probe_lockscreen();
     probe_i18n();
+    probe_cmd();
     probe_ui();
     line("==== SDK probe end ====");
 }
@@ -145,9 +149,9 @@ fn probe_sysinfo() {
 fn probe_random() {
     line("-- random --");
     let mut buf = [0u8; 16];
-    line(&format!("random::fill(16) = {}", random::fill(&mut buf)));
+    line(&format!("random::fill(16) = {:?}", random::fill(&mut buf)));
     let mut buf2 = [0u8; 8];
-    line(&format!("random::fill_strict(8) = {}", random::fill_strict(&mut buf2)));
+    line(&format!("random::fill_strict(8) = {:?}", random::fill_strict(&mut buf2)));
     line(&format!("random::u32 = {:?}", random::u32()));
 }
 
@@ -209,28 +213,41 @@ fn probe_nvs() {
     line("-- nvs (own namespace round-trip) --");
     let set = nvs::set_u32("__probe_u32", 0xCAFE_F00D);
     let got = nvs::get_u32("__probe_u32");
-    line(&format!("nvs::set_u32/get_u32 {}", pass(set && got == Some(0xCAFE_F00D))));
+    line(&format!("nvs::set_u32/get_u32 {}", pass(set.is_ok() && got == Some(0xCAFE_F00D))));
 
     let blob_set = nvs::set_blob("__probe_blob", &[1, 2, 3, 4]);
-    let blob_get = nvs::get_blob("__probe_blob");
+    let blob_get = nvs::get_blob("__probe_blob", 32);
     line(&format!(
         "nvs::set_blob/get_blob {}",
-        pass(blob_set && blob_get.as_deref() == Some(&[1, 2, 3, 4][..]))
+        pass(blob_set.is_ok() && blob_get.as_deref() == Some(&[1, 2, 3, 4][..]))
     ));
 
     let str_set = nvs::set_str("__probe_str", "hello");
     let str_get = nvs::get_str("__probe_str", 32);
     line(&format!(
         "nvs::set_str/get_str {}",
-        pass(str_set && str_get.as_deref() == Some("hello"))
+        pass(str_set.is_ok() && str_get.as_deref() == Some("hello"))
     ));
 
     line(&format!("nvs::list_keys = {:?}", nvs::list_keys(256)));
-    line(&format!("nvs::erase(__probe_u32) = {}", nvs::erase("__probe_u32")));
-    line(&format!("nvs::erase(__probe_blob) = {}", nvs::erase("__probe_blob")));
-    line(&format!("nvs::erase(__probe_str) = {}", nvs::erase("__probe_str")));
+    line(&format!("nvs::erase(__probe_u32) = {:?}", nvs::erase("__probe_u32")));
+    line(&format!("nvs::erase(__probe_blob) = {:?}", nvs::erase("__probe_blob")));
+    line(&format!("nvs::erase(__probe_str) = {:?}", nvs::erase("__probe_str")));
     // Namespace-scoped: only this plugin's own keys.
-    line(&format!("nvs::erase_all = {}", nvs::erase_all()));
+    line(&format!("nvs::erase_all = {:?}", nvs::erase_all()));
+}
+
+fn probe_fs() {
+    line("-- fs (own vFAT folder round-trip) --");
+    let write = fs::write_str("__probe.txt", "hello\nworld");
+    let read = fs::read_str("__probe.txt", 64);
+    line(&format!(
+        "fs::write_str/read_str {}",
+        pass(write.is_ok() && read.as_deref() == Some("hello\nworld"))
+    ));
+    line(&format!("fs::size = {:?}", fs::size("__probe.txt")));
+    line(&format!("fs::list = {:?}", fs::list(256)));
+    line(&format!("fs::remove = {:?}", fs::remove("__probe.txt")));
 }
 
 fn probe_rmem() {
@@ -263,9 +280,15 @@ fn probe_secure_element() {
     }
     match secure_element::generate(ECC_KEY, secure_element::Curve::P256) {
         Ok(()) => {
+            // Prove exists() flips to true for a present key (was false above
+            // because the probe deletes the key at the end of every run).
+            line(&format!("secure_element::exists after generate = {} (expect true)",
+                          secure_element::exists(ECC_KEY)));
             line(&format!("secure_element::pubkey len = {:?}", secure_element::pubkey(ECC_KEY, secure_element::Curve::P256).map(|k| k.len())));
             line(&format!("secure_element::ecdsa_sign = {:?}", secure_element::ecdsa_sign(ECC_KEY, b"probe").map(|_| ())));
             line(&format!("secure_element::delete = {:?}", secure_element::delete(ECC_KEY)));
+            line(&format!("secure_element::exists after delete = {} (expect false)",
+                          secure_element::exists(ECC_KEY)));
         }
         Err(_) => line("secure_element::generate -> Err (SE absent or no capability) [ok]"),
     }
@@ -330,13 +353,39 @@ fn probe_wifi() {
 }
 
 fn probe_ble() {
-    line("-- ble (read-only) --");
+    line("-- ble (read-only + register round-trip) --");
     line(&format!("ble::is_enabled = {}", ble::is_enabled()));
     line(&format!("ble::mac = {:?}", ble::mac()));
     line(&format!("ble::device_name = {:?}", ble::device_name()));
     line(&format!("ble::rssi = {}", ble::rssi()));
-    line(&format!("ble::scan_start = {:?}", ble::scan_start()));
+    line(&format!("ble::scan_start = {:?}", ble::scan_start(2000)));
+    line(&format!("ble::scan_done = {}", ble::scan_done()));
     line(&format!("ble::scan_results = {:?}", ble::scan_results(4).map(|v| v.len())));
+    line(&format!("ble::conn_handle = {}", ble::conn_handle()));
+
+    // Peripheral round-trip: register a throwaway service on the reserved slot
+    // (random 128-bit UUID, not a reserved one), then unregister it.
+    let svc_uuid = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                    0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xF0, 0x0F];
+    let char_uuid = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                     0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xF1, 0x0F];
+    let mut chars = [ble::CharDef::new(
+        char_uuid,
+        ble::PROP_READ | ble::PROP_NOTIFY | ble::PROP_WRITE,
+        4250,
+    )];
+    match ble::register_service(svc_uuid, &mut chars) {
+        Ok(h) => {
+            line(&format!("ble::register_service = svc {}, char {}", h, chars[0].char_handle));
+            line(&format!("ble::notify (no peer) = {:?}", ble::notify(chars[0].char_handle, b"hi")));
+            let mut wbuf = [0u8; 16];
+            line(&format!("ble::consume_write (empty) = {:?}", ble::consume_write(chars[0].char_handle, &mut wbuf)));
+            line(&format!("ble::unregister_service = {:?}", ble::unregister_service(h)));
+        }
+        Err(e) => line(&format!("ble::register_service -> {:?} [ok if BLE off]", e)),
+    }
+    let mut nbuf = [0u8; 32];
+    line(&format!("ble::consume_notification (empty) = {:?}", ble::consume_notification(&mut nbuf)));
 }
 
 fn probe_display() {
@@ -378,12 +427,12 @@ fn probe_usb() {
 fn probe_event() {
     line("-- event bus (subscribe/unsubscribe) --");
     match event::subscribe(event::KEY_PRESSED, 4242) {
-        Some(id) => {
+        Ok(id) => {
             line(&format!("event::subscribe = {}", id));
             event::unsubscribe(id);
             line("event::unsubscribe done");
         }
-        None => line("event::subscribe -> None"),
+        Err(e) => line(&format!("event::subscribe -> {:?}", e)),
     }
     event::publish_module_event(1, 0);
     line("event::publish_module_event done");
@@ -391,7 +440,7 @@ fn probe_event() {
 
 fn probe_lockscreen() {
     line("-- lockscreen quick action --");
-    line(&format!("lockscreen::register = {}", lockscreen::register("running", 4243)));
+    line(&format!("lockscreen::register = {:?}", lockscreen::register("running", 4243)));
     lockscreen::unregister();
     line("lockscreen::unregister done");
 }
@@ -404,16 +453,181 @@ fn probe_i18n() {
     line(&format!("i18n::tr_core(core.ok) = {:?}", i18n::tr_core("core.ok")));
 }
 
+fn probe_cmd() {
+    line("-- cmd (plugin command channel) --");
+    // No host-pushed command pending in this context -> None.
+    line(&format!("cmd::consume = {:?}", cmd::consume(64)));
+}
+
+fn probe_http() {
+    line("-- http (live request, only when WiFi is connected) --");
+    if !wifi::is_connected() {
+        line("http: WiFi not connected, skipping live request");
+        return;
+    }
+    match http::Request::open(http::GET, "http://example.com/", 8000) {
+        Ok(req) => {
+            let _ = req.header("Accept", "text/plain");
+            match req.perform() {
+                Ok(status) => {
+                    line(&format!("http::perform status = {}", status));
+                    line(&format!("http::content_length = {}", req.content_length()));
+                    match req.read_to_string() {
+                        Ok(body) => line(&format!("http::read_to_string = {} bytes", body.len())),
+                        Err(e) => line(&format!("http::read_to_string -> {:?}", e)),
+                    }
+                }
+                Err(e) => line(&format!("http::perform -> {:?}", e)),
+            }
+        }
+        Err(e) => line(&format!("http::open -> {:?}", e)),
+    }
+}
+
+fn probe_canvas() {
+    line("-- canvas (push, draw everything, widgets, then pop) --");
+    canvas::push("Probe canvas", 4400, 4401);
+    let (w, h) = canvas::body_size();
+    line(&format!("canvas::body_size = {}x{}", w, h));
+    canvas::set_footer("canvas footer");
+    canvas::clear();
+    canvas::set_text_size(2);
+    line(&format!("canvas::set_font = {:?}", canvas::set_font(canvas::FONT_BOLD_9PT)));
+    line(&format!(
+        "canvas::pick_font_that_fits = {:?}",
+        canvas::pick_font_that_fits(
+            "Probe",
+            120,
+            &[canvas::FONT_BOLD_12PT, canvas::FONT_BOLD_9PT, canvas::FONT_BUILTIN]
+        )
+    ));
+    canvas::set_text_inverted(false);
+    canvas::draw_text(0, 10, "probe");
+    canvas::draw_text_aligned(0, 24, w as i16, "centered", canvas::ALIGN_CENTER);
+    canvas::draw_rect(2, 40, 20, 12, false);
+    canvas::draw_rect(26, 40, 20, 12, true);
+    canvas::invert_rect(2, 40, 8, 6);
+    canvas::hline(0, 60, 80);
+    canvas::vline(0, 0, 60);
+    line("canvas: draw primitives done");
+    canvas::add_slider(1, 0, 100, 50, 5);
+    canvas::add_text(2, 16, Some("hi"));
+    canvas::add_button(3);
+    canvas::set_value(1, 42);
+    line(&format!("canvas::get_value(1) = {:?}", canvas::get_value(1)));
+    canvas::set_text(2, "edited");
+    line(&format!("canvas::get_text(2) = {:?}", canvas::get_text(2, 16)));
+    canvas::set_focus(1);
+    line(&format!("canvas::get_focus = {}", canvas::get_focus()));
+    canvas::set_key_repeat(400, 120);
+    canvas::remove_widget(3);
+    canvas::commit(false);
+    line("canvas: widgets + commit done");
+    ui::pop();
+    line("canvas::pop done");
+}
+
 fn probe_ui() {
-    line("-- ui (non-interactive) --");
-    line(&format!("ui::acquire_exclusive = {}", ui::acquire_exclusive()));
-    line(&format!("ui::release_exclusive = {}", ui::release_exclusive()));
-    ui::set_inactivity(600_000, 4244);
-    line("ui::set_inactivity armed (10min)");
+    line("-- ui (push every view type, then pop) --");
+
+    // String conversion helpers.
+    line(&format!("ui::to_display = {} bytes", ui::to_display("<b>H&auml;</b>").len()));
+    line(&format!(
+        "ui::to_display_with(LATIN1) = {} bytes",
+        ui::to_display_with("Test", ui::HOST_STR_TARGET_LATIN1).len()
+    ));
+
+    // Transient / modal pushes.
+    ui::push_toast("probe toast", ui::UI_ICON_INFO, 300);
+    line("ui::push_toast done");
+    ui::push_message("probe message", ui::UI_ICON_INFO, 300);
+    line("ui::push_message done");
+    ui::push_info("Probe", "info body");
+    ui::pop();
+    line("ui::push_info + pop done");
+    ui::push_confirm("confirm?", ui::UI_ICON_INFO, 4300);
+    ui::pop();
+    line("ui::push_confirm + pop done");
+
+    // List view + list mutators.
+    ui::ListBuilder::new("Probe list")
+        .on_select(4301)
+        .on_menu(4302)
+        .item("Item A", 1, ui::UI_ICON_BULLET)
+        .item("Item B", 2, ui::UI_ICON_BULLET)
+        .push();
+    ui::set_footer("footer hint");
+    ui::set_list_empty("empty text");
+    ui::update_list_item(0, "Item A*", 1, ui::UI_ICON_CIRCLE);
+    ui::insert_list_item(1, "Item Ins", 3, ui::UI_ICON_BULLET);
+    ui::remove_list_item(2);
+    line("ui::ListBuilder + set_footer/set_list_empty/update/insert/remove_list_item done");
+    ui::ListBuilder::new("Probe list 2")
+        .on_select(4301)
+        .item("X", 9, ui::UI_ICON_BULLET)
+        .replace();
+    line("ui::ListBuilder::replace done");
+    ui::pop();
+    line("ui::pop (list) done");
+
+    // Context menu.
+    ui::ContextMenuBuilder::new("Ctx")
+        .on_select(4303)
+        .item("C1", 1, ui::UI_ICON_BULLET)
+        .push();
+    ui::pop();
+    line("ui::ContextMenuBuilder + pop done");
+
+    // Slider.
+    ui::SliderBuilder::new("Slider")
+        .range(0, 100)
+        .initial(50)
+        .step(5)
+        .unit("%")
+        .on_save(4304)
+        .push();
+    ui::pop();
+    line("ui::SliderBuilder + pop done");
+
+    // Color picker.
+    ui::push_color_picker(10, 20, 30, 4305);
+    ui::pop();
+    line("ui::push_color_picker + pop done");
+
+    // Text inputs.
+    ui::push_t9_input("T9", Some("hi"), 16, 4306);
+    ui::pop();
+    line("ui::push_t9_input + pop done");
+    ui::push_password("PW", None, 16, 4307);
+    ui::pop();
+    line("ui::push_password + pop done");
+
+    // Date / time / PIN entry.
+    ui::push_date("Date", 30, 5, 2026, 4308);
+    ui::pop();
+    line("ui::push_date + pop done");
+    ui::push_time("Time", 12, 34, 4309);
+    ui::pop();
+    line("ui::push_time + pop done");
+    ui::push_pin_entry("PIN", 6, 3, 4310);
+    ui::pop();
+    line("ui::push_pin_entry + pop done");
+
+    // Input consumers (no pending input -> None).
+    line(&format!("ui::consume_input_int = {:?}", ui::consume_input_int()));
+    line(&format!("ui::consume_input_text = {:?}", ui::consume_input_text(32)));
+
+    // Exclusive lock / inactivity / wink / repaint.
+    line(&format!("ui::acquire_exclusive = {:?}", ui::acquire_exclusive()));
+    line(&format!("ui::release_exclusive = {:?}", ui::release_exclusive()));
+    ui::set_inactivity(600_000, 4311);
+    line("ui::set_inactivity done");
     ui::wink(1, 60);
     line("ui::wink done");
-    line("ui: interactive view pushes (list/info/confirm/t9/password/pin/slider/date/time/color) intentionally skipped");
-    line("http/canvas/cmd: skipped (network / view-system / requires pending command)");
-    // Touch http with a fast-failing call so the binding is still exercised.
-    line(&format!("http::open(short timeout) = {:?}", http::Request::open(http::GET, "http://127.0.0.1:1/", 100).map(|_| ())));
+    ui::repaint();
+    line("ui::repaint done");
+
+    // Return to the plugin's root view.
+    ui::pop_to_plugin();
+    line("ui::pop_to_plugin done");
 }

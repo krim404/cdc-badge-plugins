@@ -4,28 +4,22 @@
 //! Reads and writes the I2C EEPROM of an attached "Shitty Add-On". Access
 //! is gated by the manifest capability for the SAO port.
 
+use crate::{check, Result};
 use alloc::vec::Vec;
 use core::ffi::c_int;
-
-/// \brief Generic SAO error returned by the helpers in this module.
-#[derive(Debug, Clone, Copy)]
-pub struct SaoError;
 
 /// \brief Read `len` bytes from the SAO EEPROM starting at `offset`.
 /// \param offset Byte offset into the EEPROM.
 /// \param len    Number of bytes to read.
-/// \return The bytes read, or `Err(SaoError)` on failure.
-pub fn eeprom_read(offset: u16, len: usize) -> Result<Vec<u8>, SaoError> {
+/// \return The bytes read, or `Err` on failure.
+pub fn eeprom_read(offset: u16, len: usize) -> Result<Vec<u8>> {
     let mut buf = Vec::<u8>::with_capacity(len);
     let rc = unsafe {
         buf.set_len(len);
         host_sao_eeprom_read(offset, buf.as_mut_ptr(), len)
     };
-    if rc == 0 {
-        Ok(buf)
-    } else {
-        Err(SaoError)
-    }
+    check(rc)?;
+    Ok(buf)
 }
 
 /// \brief Write bytes to the SAO EEPROM starting at `offset`.
@@ -33,14 +27,9 @@ pub fn eeprom_read(offset: u16, len: usize) -> Result<Vec<u8>, SaoError> {
 /// Mutates the attached add-on's persistent EEPROM contents.
 /// \param offset Byte offset into the EEPROM.
 /// \param data   Bytes to write.
-/// \return `Ok(())` on success, `Err(SaoError)` on failure.
-pub fn eeprom_write(offset: u16, data: &[u8]) -> Result<(), SaoError> {
-    let rc = unsafe { host_sao_eeprom_write(offset, data.as_ptr(), data.len()) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(SaoError)
-    }
+/// \return `Ok(())` on success, `Err` on failure.
+pub fn eeprom_write(offset: u16, data: &[u8]) -> Result<()> {
+    check(unsafe { host_sao_eeprom_write(offset, data.as_ptr(), data.len()) })
 }
 
 #[link(wasm_import_module = "cdc")]

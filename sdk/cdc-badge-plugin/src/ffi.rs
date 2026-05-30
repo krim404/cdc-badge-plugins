@@ -51,7 +51,7 @@ extern "C" {
     pub fn host_is_battery_critical() -> bool;
 
     // NVS
-    pub fn host_nvs_get_blob(key: *const c_char, buf: *mut u8, len: *mut usize) -> c_int;
+    pub fn host_nvs_get_blob(key: *const c_char, buf: *mut u8, buf_size: usize) -> c_int;
     pub fn host_nvs_set_blob(key: *const c_char, buf: *const u8, len: usize) -> c_int;
     pub fn host_nvs_get_str(key: *const c_char, buf: *mut c_char, buf_size: usize) -> c_int;
     pub fn host_nvs_set_str(key: *const c_char, value: *const c_char) -> c_int;
@@ -60,6 +60,14 @@ extern "C" {
     pub fn host_nvs_erase(key: *const c_char) -> c_int;
     pub fn host_nvs_erase_all() -> c_int;
     pub fn host_nvs_list_keys(out: *mut c_char, out_len: *mut usize) -> c_int;
+
+    // vFAT (sandboxed plugin file storage)
+    pub fn host_fs_write(name: *const c_char, data: *const u8, len: usize) -> c_int;
+    pub fn host_fs_read(name: *const c_char, buf: *mut u8, buf_size: usize) -> c_int;
+    pub fn host_fs_remove(name: *const c_char) -> c_int;
+    pub fn host_fs_size(name: *const c_char) -> c_int;
+    pub fn host_fs_list(out: *mut c_char, out_size: usize) -> c_int;
+    pub fn host_fs_view(name: *const c_char) -> c_int;
 
     // UI
     pub fn host_ui_push_toast(text: *const c_char, icon: u8, duration_ms: u16) -> c_int;
@@ -95,6 +103,9 @@ extern "C" {
     ) -> c_int;
     pub fn host_ui_set_view_footer(hint: *const c_char) -> c_int;
     pub fn host_ui_set_view_empty(text: *const c_char) -> c_int;
+    pub fn host_ui_update_list_item(index: u16, item: *const UiItem) -> c_int;
+    pub fn host_ui_insert_list_item(index: u16, item: *const UiItem) -> c_int;
+    pub fn host_ui_remove_list_item(index: u16) -> c_int;
     pub fn host_ui_push_context_menu(
         title: *const c_char,
         items: *const UiItem,
@@ -175,6 +186,11 @@ extern "C" {
         out: *mut c_char,
         out_size: usize,
         target: u32,
+    ) -> c_int;
+    pub fn host_str_to_utf8(
+        input: *const c_char,
+        out: *mut c_char,
+        out_size: usize,
     ) -> c_int;
 }
 

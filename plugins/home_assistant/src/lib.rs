@@ -786,11 +786,11 @@ fn home_open_menu() {
     let configured = ha_host().is_some() && ha_token().is_some();
     let entity = SELECTED.borrow().clone();
     let mut builder =
-        ui::ContextMenuBuilder::new(i18n::tr_key("actions")).on_select(ACT_HOME_CTX_PICK);
+        ui::ContextMenuBuilder::new(i18n::tr_core("core.actions")).on_select(ACT_HOME_CTX_PICK);
 
     if let Some(e) = entity.as_ref() {
         if e.domain == Domain::Light {
-            builder = builder.item(i18n::tr_key("brightness"), CTX_BRIGHTNESS, ui::UI_ICON_SUN);
+            builder = builder.item(i18n::tr_core("core.brightness"), CTX_BRIGHTNESS, ui::UI_ICON_SUN);
             builder = builder.item(i18n::tr_key("color"), CTX_COLOR, ui::UI_ICON_DIAMOND);
         }
         if e.domain == Domain::Cover {
@@ -1006,7 +1006,7 @@ fn browse_search_done(text: Option<String>) {
 fn light_brightness_start(e: &Entity) {
     *SELECTED.borrow_mut() = Some(e.clone());
     let initial = e.brightness_pct.max(1).min(100) as i32;
-    ui::SliderBuilder::new(i18n::tr_key("brightness"))
+    ui::SliderBuilder::new(i18n::tr_core("core.brightness"))
         .range(0, 100)
         .initial(initial)
         .step(5)
@@ -1029,7 +1029,7 @@ fn light_brightness_done(value: i32) {
     };
     match result {
         Ok(()) => {
-            ui::push_toast(i18n::tr_key("saved"), ui::UI_ICON_SUCCESS, 800);
+            ui::push_toast(i18n::tr_core("core.saved"), ui::UI_ICON_SUCCESS, 800);
             home_render();
         }
         Err(()) => ui::push_toast(i18n::tr_key("save_failed"), ui::UI_ICON_ERROR, 1500),
@@ -1057,7 +1057,7 @@ fn light_color_done(packed: u32) {
     };
     match result {
         Ok(()) => {
-            ui::push_toast(i18n::tr_key("saved"), ui::UI_ICON_SUCCESS, 800);
+            ui::push_toast(i18n::tr_core("core.saved"), ui::UI_ICON_SUCCESS, 800);
             home_render();
         }
         Err(()) => ui::push_toast(i18n::tr_key("save_failed"), ui::UI_ICON_ERROR, 1500),
@@ -1087,7 +1087,7 @@ fn cover_position_done(value: i32) {
     let extra = format!("\"position\":{}", value);
     match call_service("cover", "set_cover_position", &entity.id, Some(&extra)) {
         Ok(()) => {
-            ui::push_toast(i18n::tr_key("saved"), ui::UI_ICON_SUCCESS, 800);
+            ui::push_toast(i18n::tr_core("core.saved"), ui::UI_ICON_SUCCESS, 800);
             home_render();
         }
         Err(()) => ui::push_toast(i18n::tr_key("save_failed"), ui::UI_ICON_ERROR, 1500),
@@ -1440,7 +1440,7 @@ fn climate_commit() {
     if any_err {
         ui::push_toast(i18n::tr_key("save_failed"), ui::UI_ICON_ERROR, 1500);
     } else {
-        ui::push_toast(i18n::tr_key("saved"), ui::UI_ICON_SUCCESS, 800);
+        ui::push_toast(i18n::tr_core("core.saved"), ui::UI_ICON_SUCCESS, 800);
     }
 
     *CLIMATE.borrow_mut() = None;

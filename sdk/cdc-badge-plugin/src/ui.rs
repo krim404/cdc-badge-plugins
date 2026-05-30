@@ -8,6 +8,7 @@
 //! `consume_input_int` or `consume_input_text`.
 
 use crate::ffi::{self, UiItem};
+use crate::{check, Result};
 use alloc::ffi::CString;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -58,6 +59,25 @@ pub fn to_display_with(input: &str, target: u32) -> Vec<u8> {
 /// `to_display_with(s, HOST_STR_TARGET_LATIN1)` instead.
 pub fn to_display(input: &str) -> Vec<u8> {
     to_display_with(input, HOST_STR_TARGET_CP437)
+}
+
+/// \brief Inverse of `to_display`: convert CP437 display bytes back to a UTF-8
+/// String. Use before persisting or transmitting on-screen-edited text so it
+/// stays UTF-8.
+pub fn from_display(input: &[u8]) -> alloc::string::String {
+    let in_c = match CString::new(input) {
+        Ok(c) => c,
+        Err(_) => return alloc::string::String::new(),
+    };
+    let cap = input.len() * 3 + 4;
+    let mut buf: Vec<u8> = vec![0u8; cap];
+    let rc = unsafe { ffi::host_str_to_utf8(in_c.as_ptr(), buf.as_mut_ptr() as *mut _, cap) };
+    if rc < 0 {
+        return alloc::string::String::new();
+    }
+    let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    buf.truncate(nul);
+    alloc::string::String::from_utf8(buf).unwrap_or_default()
 }
 
 fn to_cstring<L: AsRef<[u8]>>(label: L) -> Option<CString> {
@@ -252,6 +272,65 @@ pub fn set_list_empty<T: AsRef<[u8]>>(text: T) {
         unsafe {
             ffi::host_ui_set_view_empty(c.as_ptr());
         }
+    }
+}
+
+/// \brief Update a single row of the plugin's current top list in place.
+///
+/// Redraws only the given row (partial refresh) instead of re-pushing the
+/// whole list, so a list can be refreshed cell-by-cell without flicker or
+/// growing the view stack. `index` is the row position; `label`, `item_id`
+/// and `icon` replace the row's values. The host copies the label, so the
+/// borrow only needs to live for the call. No-op when the plugin's list is
+/// not the active top view or the row is off screen.
+/// \param index   Row index in the list.
+/// \param label   New display label.
+/// \param item_id New plugin-defined id echoed back via `_user_data`.
+/// \param icon    One of the `UI_ICON_*` constants.
+pub fn update_list_item<L: AsRef<[u8]>>(index: u16, label: L, item_id: u32, icon: u8) {
+    if let Some(c) = to_cstring(label) {
+        let item = UiItem {
+            label: c.as_ptr(),
+            icon,
+            icon_disabled: false,
+            item_id,
+        };
+        unsafe {
+            ffi::host_ui_update_list_item(index, &item);
+        }
+    }
+}
+
+/// \brief Insert a new row into the plugin's current top list at `index`.
+///
+/// Later rows shift down; the list is rebuilt host-side and partial-repainted
+/// (no full re-push). `index` is clamped to the current count (append). The
+/// host copies the label, so the borrow only needs to live for the call.
+/// \param index   Position to insert at.
+/// \param label   Display label.
+/// \param item_id Plugin-defined id echoed back via `_user_data`.
+/// \param icon    One of the `UI_ICON_*` constants.
+pub fn insert_list_item<L: AsRef<[u8]>>(index: u16, label: L, item_id: u32, icon: u8) {
+    if let Some(c) = to_cstring(label) {
+        let item = UiItem {
+            label: c.as_ptr(),
+            icon,
+            icon_disabled: false,
+            item_id,
+        };
+        unsafe {
+            ffi::host_ui_insert_list_item(index, &item);
+        }
+    }
+}
+
+/// \brief Remove the row at `index` from the plugin's current top list.
+///
+/// Later rows shift up; the list is rebuilt host-side and partial-repainted.
+/// \param index Index of the row to remove.
+pub fn remove_list_item(index: u16) {
+    unsafe {
+        ffi::host_ui_remove_list_item(index);
     }
 }
 
@@ -488,7 +567,8 @@ pub fn consume_input_text(max_len: usize) -> Option<alloc::string::String> {
         buf.set_len(cap);
         ffi::host_ui_consume_input_text(buf.as_mut_ptr() as *mut core::ffi::c_char, cap)
     };
-    if rc < 0 {
+    // rc is the byte count; 0 means no input is pending (not an empty entry).
+    if rc <= 0 {
         return None;
     }
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
@@ -537,15 +617,15 @@ pub fn push_pin_entry(title: &str, max_len: u8, max_attempts: u8, action_id: u32
 }
 
 /// \brief Claim exclusive UI ownership, blocking other plugins from pushing views.
-/// \return `true` on success.
-pub fn acquire_exclusive() -> bool {
-    unsafe { ffi::host_ui_acquire_exclusive() == ffi::HOST_OK }
+/// \return `Ok(())` on success, `Err` on failure.
+pub fn acquire_exclusive() -> Result<()> {
+    check(unsafe { ffi::host_ui_acquire_exclusive() })
 }
 
 /// \brief Release a previously acquired exclusive UI lock.
-/// \return `true` on success.
-pub fn release_exclusive() -> bool {
-    unsafe { ffi::host_ui_release_exclusive() == ffi::HOST_OK }
+/// \return `Ok(())` on success, `Err` on failure.
+pub fn release_exclusive() -> Result<()> {
+    check(unsafe { ffi::host_ui_release_exclusive() })
 }
 
 /// \brief Arm an inactivity timer for the plugin's current view.

@@ -291,14 +291,14 @@ fn show_top_menu() {
     let toggle_label = format!(
         "{}: {}",
         i18n::tr_key("menu_enable"),
-        if s().enabled { i18n::tr_key("on") } else { i18n::tr_key("off") },
+        if s().enabled { i18n::tr_core("core.on") } else { i18n::tr_core("core.off") },
     );
 
     ListBuilder::new(i18n::tr_meta("name"))
         .on_select(ACT_TOP_SELECT)
         .item(&toggle_label, ITEM_TOGGLE, if s().enabled { ui::UI_ICON_SUCCESS } else { ui::UI_ICON_CIRCLE })
         .item(i18n::tr_key("menu_count"),  ITEM_COUNT,  ui::UI_ICON_BAR)
-        .item(i18n::tr_key("menu_bright"), ITEM_BRIGHT, ui::UI_ICON_SUN)
+        .item(i18n::tr_core("core.brightness"), ITEM_BRIGHT, ui::UI_ICON_SUN)
         .item(i18n::tr_key("menu_color"),  ITEM_COLOR,  ui::UI_ICON_DIAMOND)
         .item(i18n::tr_key("menu_effect"), ITEM_EFFECT, ui::UI_ICON_NOTES)
         .item(i18n::tr_key("menu_speed"),  ITEM_SPEED,  ui::UI_ICON_LEFTRIGHT)
@@ -319,7 +319,7 @@ fn show_count_slider() {
 }
 
 fn show_bright_slider() {
-    SliderBuilder::new(i18n::tr_key("menu_bright"))
+    SliderBuilder::new(i18n::tr_core("core.brightness"))
         .range(0, 255).initial(s().brightness as i32).step(5)
         .on_save(ACT_BRIGHT_SAVE).push();
 }
@@ -340,7 +340,7 @@ fn show_effect_menu() {
 }
 
 fn toast_saved() {
-    ui::push_toast(i18n::tr_key("saved"), ui::UI_ICON_SUCCESS, 600);
+    ui::push_toast(i18n::tr_core("core.saved"), ui::UI_ICON_SUCCESS, 600);
 }
 
 // --- Lifecycle ------------------------------------------------------------
@@ -357,8 +357,8 @@ pub extern "C" fn plugin_init() -> i32 {
         log::error(TAG, "pixel_strip::init failed");
         return -1;
     }
-    event::subscribe(event::SYSTEM_SLEEP | event::SYSTEM_WAKE, ACT_EVENT);
-    lockscreen::register("menu_enable", ACT_LOCK_TOGGLE);
+    let _ = event::subscribe(event::SYSTEM_SLEEP | event::SYSTEM_WAKE, ACT_EVENT);
+    let _ = lockscreen::register("menu_enable", ACT_LOCK_TOGGLE);
     log::info(TAG, "grove_led initialised");
     0
 }
@@ -416,7 +416,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
     match action_id {
         ACT_LOCK_TOGGLE => {
             s().enabled = !s().enabled;
-            nvs::set_u32(NVS_ENABLED, s().enabled as u32);
+            let _ = nvs::set_u32(NVS_ENABLED, s().enabled as u32);
             if !s().enabled {
                 let _ = pixel_strip::clear();
                 let _ = pixel_strip::refresh();
@@ -434,7 +434,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
         ACT_TOP_SELECT => match idx {
             ITEM_TOGGLE => {
                 s().enabled = !s().enabled;
-                nvs::set_u32(NVS_ENABLED, s().enabled as u32);
+                let _ = nvs::set_u32(NVS_ENABLED, s().enabled as u32);
                 if !s().enabled {
                     let _ = pixel_strip::clear();
                     let _ = pixel_strip::refresh();
@@ -451,7 +451,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
         ACT_COUNT_SAVE => {
             if let Some(v) = ui::consume_input_int() {
                 s().count = clamp_count(v.clamp(1, MAX_LEDS as i32) as u8);
-                nvs::set_u32(NVS_COUNT, s().count as u32);
+                let _ = nvs::set_u32(NVS_COUNT, s().count as u32);
                 let _ = pixel_strip::init(DATA_PIN, s().count as u16, pixel_strip::Format::Grb);
                 toast_saved();
             }
@@ -459,7 +459,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
         ACT_BRIGHT_SAVE => {
             if let Some(v) = ui::consume_input_int() {
                 s().brightness = v.clamp(0, 255) as u8;
-                nvs::set_u32(NVS_BRIGHT, s().brightness as u32);
+                let _ = nvs::set_u32(NVS_BRIGHT, s().brightness as u32);
                 toast_saved();
             }
         }
@@ -470,22 +470,22 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
                 s().g = ((p >> 8) & 0xFF) as u8;
                 s().b = (p & 0xFF) as u8;
                 s().effect = Effect::Static;
-                nvs::set_u32(NVS_R, s().r as u32);
-                nvs::set_u32(NVS_G, s().g as u32);
-                nvs::set_u32(NVS_B, s().b as u32);
-                nvs::set_u32(NVS_EFFECT, s().effect as u32);
+                let _ = nvs::set_u32(NVS_R, s().r as u32);
+                let _ = nvs::set_u32(NVS_G, s().g as u32);
+                let _ = nvs::set_u32(NVS_B, s().b as u32);
+                let _ = nvs::set_u32(NVS_EFFECT, s().effect as u32);
                 toast_saved();
             }
         }
         ACT_EFFECT_SELECT => {
             s().effect = Effect::from_u8(idx as u8);
-            nvs::set_u32(NVS_EFFECT, s().effect as u32);
+            let _ = nvs::set_u32(NVS_EFFECT, s().effect as u32);
             toast_saved();
         }
         ACT_SPEED_SAVE => {
             if let Some(v) = ui::consume_input_int() {
                 s().speed = (v as u8).clamp(1, 100);
-                nvs::set_u32(NVS_SPEED, s().speed as u32);
+                let _ = nvs::set_u32(NVS_SPEED, s().speed as u32);
                 toast_saved();
             }
         }

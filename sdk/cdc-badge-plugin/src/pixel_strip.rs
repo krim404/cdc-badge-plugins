@@ -6,6 +6,7 @@
 //! `init()` identifies the configuration. The manifest must declare
 //! `capabilities.pixel_strip = true`.
 
+use crate::{check, Result};
 use core::ffi::c_int;
 
 /// \brief Pixel layout the firmware expects.
@@ -32,21 +33,6 @@ extern "C" {
     fn host_pixel_strip_refresh() -> c_int;
     fn host_pixel_strip_length() -> u16;
     fn host_pixel_strip_ready() -> bool;
-}
-
-/// \brief Generic pixel-strip error wrapping the host's return code.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct Error(pub c_int);
-
-/// \brief Convenience alias for fallible pixel-strip operations.
-pub type Result<T> = core::result::Result<T, Error>;
-
-fn check(rc: c_int) -> Result<()> {
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(Error(rc))
-    }
 }
 
 /// \brief Initialise (or re-initialise) the strip.

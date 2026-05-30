@@ -1,0 +1,32 @@
+{
+  "id": "ble_scanner",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "sensor",
+  "host_api_level_min": "0.6",
+  "linear_memory_kb": 64,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": { "en": "BLE Scanner" },
+      "description": { "en": "Continuously scans for BLE devices, sorted by RSSI with a per-device sighting counter." }
+    },
+    "strings": {
+      "title":    { "en": "BLE Scanner" },
+      "empty":    { "en": "Scanning..." },
+      "disabled": { "en": "BLE is disabled" },
+      "seen":     { "en": "Seen" },
+      "rssi":     { "en": "RSSI" },
+      "type_pub": { "en": "public" },
+      "type_rnd": { "en": "random" }
+    }
+  },
+  "capabilities": {
+    "ble": true,
+    "background": false,
+    "prevent_sleep": true,
+    "vfat": true,
+    "ui_exclusive": false
+  },
+  "prerequisites": {}
+}

@@ -41,14 +41,20 @@ Plugin code looks them up with `host_i18n_tr_key("save")` or `host_i18n_tr_meta(
   "wifi": true,
   "ble": false,
   "rmem": ["ha_token"],
-  "ecc_slots": [],
+  "ecc": ["signing_key"],
   "ble_service_uuids": [],
   "nvs_namespace": "plugin_ha",
   "http": true,
   "display_lowlevel": false,
-  "ui_exclusive": true
+  "ui_exclusive": true,
+  "background": true,
+  "prevent_sleep": true
 }
 ```
+
+`background` keeps the plugin loaded and ticking (`plugin_on_tick`) after the
+user leaves it. `prevent_sleep` stops the badge from entering the lock-screen
+light sleep while the plugin is loaded; see [Capabilities](capabilities.md).
 
 `rmem` is a list of slot names (1-15 chars each). The host allocates a
 physical slot from the plugin pool (TROPIC01 R-Mem slots 501-511) on first
@@ -58,6 +64,14 @@ scope). Calls to capabilities that were not declared return
 `HOST_ERR_NO_CAPABILITY`. System slots (PIN hashes, FIDO2 keys, GPG keys,
 TOTP secrets, password vault) live outside the plugin pool and are not
 addressable from a plugin under any circumstance.
+
+`ecc` is a list of ECC key names (1-15 chars each), addressed by name exactly
+like `rmem`. The host maps each declared name to a slot in a small reserved
+plugin ECC pool and persists the mapping in NVS, so a key keeps its slot across
+reboot and reinstall; plugins never reference a physical slot number. The pool
+is intentionally tiny (firmware features such as attestation and WebAuthn own
+the scarce TROPIC01 slots), so only a limited number of plugin ECC keys can be
+live at once.
 
 `nvs_namespace` **must start with `plg_` or `plugin_`** (lowercase, digits
 and underscore only, 15-char NVS hard limit). The prefix is enforced both

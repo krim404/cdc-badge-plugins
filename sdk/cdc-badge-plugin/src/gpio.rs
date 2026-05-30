@@ -7,6 +7,8 @@
 //! shortcuts `grove` / `sao`. Host calls for undeclared pins return
 //! `HOST_ERR_NO_CAPABILITY`.
 
+use crate::{check, Result};
+
 /// \brief GPIO direction modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -43,61 +45,38 @@ impl Pull {
     }
 }
 
-/// \brief Generic GPIO error returned by the helpers in this module.
-#[derive(Debug, Clone, Copy)]
-pub struct GpioError;
-
 /// \brief Configure a pin's direction (input / push-pull / open-drain).
 /// \param pin Pin number from the manifest's `gpio_pins`.
 /// \param dir Desired direction.
-/// \return `Ok(())` on success, `Err(GpioError)` on denial / hw failure.
-pub fn set_direction(pin: u8, dir: Direction) -> Result<(), GpioError> {
-    let rc = unsafe { ffi_gpio::host_gpio_set_direction(pin, dir.as_u8()) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(GpioError)
-    }
+/// \return `Ok(())` on success, `Err` on denial / hw failure.
+pub fn set_direction(pin: u8, dir: Direction) -> Result<()> {
+    check(unsafe { ffi_gpio::host_gpio_set_direction(pin, dir.as_u8()) })
 }
 
 /// \brief Configure the internal pull resistor on a pin.
 /// \param pin  Pin number from the manifest's `gpio_pins`.
 /// \param pull Pull mode to apply.
-/// \return `Ok(())` on success, `Err(GpioError)` on failure.
-pub fn set_pull(pin: u8, pull: Pull) -> Result<(), GpioError> {
-    let rc = unsafe { ffi_gpio::host_gpio_set_pull(pin, pull.as_u8()) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(GpioError)
-    }
+/// \return `Ok(())` on success, `Err` on failure.
+pub fn set_pull(pin: u8, pull: Pull) -> Result<()> {
+    check(unsafe { ffi_gpio::host_gpio_set_pull(pin, pull.as_u8()) })
 }
 
 /// \brief Drive an output pin high or low.
 /// \param pin   Pin number from the manifest's `gpio_pins`.
 /// \param level `true` = high, `false` = low.
-/// \return `Ok(())` on success, `Err(GpioError)` on failure.
-pub fn write(pin: u8, level: bool) -> Result<(), GpioError> {
-    let rc = unsafe { ffi_gpio::host_gpio_write(pin, level) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(GpioError)
-    }
+/// \return `Ok(())` on success, `Err` on failure.
+pub fn write(pin: u8, level: bool) -> Result<()> {
+    check(unsafe { ffi_gpio::host_gpio_write(pin, level) })
 }
 
 /// \brief Sample an input pin.
 /// \param pin Pin number from the manifest's `gpio_pins`.
 /// \return `Ok(true)` if the pin reads high, `Ok(false)` if low,
-///         `Err(GpioError)` on failure.
-pub fn read(pin: u8) -> Result<bool, GpioError> {
+///         `Err` on failure.
+pub fn read(pin: u8) -> Result<bool> {
     let mut level = false;
-    let rc = unsafe { ffi_gpio::host_gpio_read(pin, &mut level) };
-    if rc == 0 {
-        Ok(level)
-    } else {
-        Err(GpioError)
-    }
+    check(unsafe { ffi_gpio::host_gpio_read(pin, &mut level) })?;
+    Ok(level)
 }
 
 /// \brief Release the pin so other capabilities (e.g. SAO, Grove) can
@@ -113,27 +92,17 @@ pub fn release(pin: u8) {
 /// \param pin            Pin number from the manifest's `pwm_pins`.
 /// \param freq_hz        Output frequency in Hz.
 /// \param duty_per_mille Duty cycle in tenths of a percent (`0..=1000`).
-/// \return `Ok(())` on success, `Err(GpioError)` on failure.
-pub fn pwm_start(pin: u8, freq_hz: u32, duty_per_mille: u16) -> Result<(), GpioError> {
-    let rc = unsafe { ffi_gpio::host_gpio_pwm_start(pin, freq_hz, duty_per_mille) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(GpioError)
-    }
+/// \return `Ok(())` on success, `Err` on failure.
+pub fn pwm_start(pin: u8, freq_hz: u32, duty_per_mille: u16) -> Result<()> {
+    check(unsafe { ffi_gpio::host_gpio_pwm_start(pin, freq_hz, duty_per_mille) })
 }
 
 /// \brief Adjust the duty cycle of an active PWM channel.
 /// \param pin            Pin number with an active PWM channel.
 /// \param duty_per_mille New duty cycle (`0..=1000`).
-/// \return `Ok(())` on success, `Err(GpioError)` on failure.
-pub fn pwm_set_duty(pin: u8, duty_per_mille: u16) -> Result<(), GpioError> {
-    let rc = unsafe { ffi_gpio::host_gpio_pwm_set_duty(pin, duty_per_mille) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(GpioError)
-    }
+/// \return `Ok(())` on success, `Err` on failure.
+pub fn pwm_set_duty(pin: u8, duty_per_mille: u16) -> Result<()> {
+    check(unsafe { ffi_gpio::host_gpio_pwm_set_duty(pin, duty_per_mille) })
 }
 
 /// \brief Stop PWM output and free the channel.
@@ -154,16 +123,12 @@ pub struct AdcReading {
 
 /// \brief Sample an ADC pin.
 /// \param pin Pin number from the manifest's `adc_pins`.
-/// \return The reading on success, `Err(GpioError)` on failure.
-pub fn adc_read(pin: u8) -> Result<AdcReading, GpioError> {
+/// \return The reading on success, `Err` on failure.
+pub fn adc_read(pin: u8) -> Result<AdcReading> {
     let mut raw: u16 = 0;
     let mut mv: u16 = 0;
-    let rc = unsafe { ffi_gpio::host_adc_read(pin, &mut raw, &mut mv) };
-    if rc == 0 {
-        Ok(AdcReading { raw, millivolt: mv })
-    } else {
-        Err(GpioError)
-    }
+    check(unsafe { ffi_gpio::host_adc_read(pin, &mut raw, &mut mv) })?;
+    Ok(AdcReading { raw, millivolt: mv })
 }
 
 mod ffi_gpio {

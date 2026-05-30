@@ -6,6 +6,7 @@
 //! Multiple plugins declaring the same name share the same physical slot
 //! by design (intentional, common scope).
 
+use crate::{check, Error, Result};
 use alloc::vec::Vec;
 use core::ffi::c_int;
 
@@ -13,13 +14,9 @@ use core::ffi::c_int;
 ///        trailing NUL.
 pub const RMEM_NAME_MAX: usize = 15;
 
-/// \brief Generic rmem error returned by the helpers in this module.
-#[derive(Debug, Clone, Copy)]
-pub struct RmemError;
-
-fn cstr(name: &str) -> Result<[u8; RMEM_NAME_MAX + 1], RmemError> {
+fn cstr(name: &str) -> Result<[u8; RMEM_NAME_MAX + 1]> {
     if name.is_empty() || name.len() > RMEM_NAME_MAX {
-        return Err(RmemError);
+        return Err(Error::InvalidArg);
     }
     let mut buf = [0u8; RMEM_NAME_MAX + 1];
     buf[..name.len()].copy_from_slice(name.as_bytes());
@@ -29,9 +26,9 @@ fn cstr(name: &str) -> Result<[u8; RMEM_NAME_MAX + 1], RmemError> {
 /// \brief Read the contents of a named rmem slot.
 /// \param name    Slot name declared in `capabilities.rmem`, 1-15 chars.
 /// \param max_len Maximum number of payload bytes to read.
-/// \return The payload bytes, or `Err(RmemError)` if the slot is unknown,
-///         empty, or capability-denied.
-pub fn read(name: &str, max_len: usize) -> Result<Vec<u8>, RmemError> {
+/// \return The payload bytes, or `Err` if the slot is unknown, empty, or
+///         capability-denied.
+pub fn read(name: &str, max_len: usize) -> Result<Vec<u8>> {
     let n = cstr(name)?;
     let mut buf = Vec::<u8>::with_capacity(max_len);
     let rc = unsafe {
@@ -39,7 +36,7 @@ pub fn read(name: &str, max_len: usize) -> Result<Vec<u8>, RmemError> {
         host_rmem_read_named(n.as_ptr(), buf.as_mut_ptr(), max_len as i32)
     };
     if rc < 0 {
-        return Err(RmemError);
+        return Err(Error::from_code(rc));
     }
     buf.truncate(rc as usize);
     Ok(buf)
@@ -51,30 +48,20 @@ pub fn read(name: &str, max_len: usize) -> Result<Vec<u8>, RmemError> {
 /// pool; subsequent writes overwrite that same slot.
 /// \param name Slot name declared in `capabilities.rmem`, 1-15 chars.
 /// \param data Payload bytes.
-/// \return `Ok(())` on success, `Err(RmemError)` on capability denial or
-///         a full plugin pool.
-pub fn write(name: &str, data: &[u8]) -> Result<(), RmemError> {
+/// \return `Ok(())` on success, `Err` on capability denial or a full plugin
+///         pool.
+pub fn write(name: &str, data: &[u8]) -> Result<()> {
     let n = cstr(name)?;
-    let rc = unsafe { host_rmem_write_named(n.as_ptr(), data.as_ptr(), data.len() as i32) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(RmemError)
-    }
+    check(unsafe { host_rmem_write_named(n.as_ptr(), data.as_ptr(), data.len() as i32) })
 }
 
 /// \brief Erase the contents of a named rmem slot.
 /// \param name Slot name declared in `capabilities.rmem`.
-/// \return `Ok(())` on success, `Err(RmemError)` if the slot does not
-///         exist or is capability-denied.
-pub fn erase(name: &str) -> Result<(), RmemError> {
+/// \return `Ok(())` on success, `Err` if the slot does not exist or is
+///         capability-denied.
+pub fn erase(name: &str) -> Result<()> {
     let n = cstr(name)?;
-    let rc = unsafe { host_rmem_erase_named(n.as_ptr()) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(RmemError)
-    }
+    check(unsafe { host_rmem_erase_named(n.as_ptr()) })
 }
 
 /// \brief Whether a named slot currently holds a value.

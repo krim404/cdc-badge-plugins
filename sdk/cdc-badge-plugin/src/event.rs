@@ -5,7 +5,7 @@
 //! below. When the event fires, the host invokes the plugin's
 //! `plugin_on_action(action_id, ...)` callback.
 
-use crate::ffi;
+use crate::{ffi, Error, Result};
 
 pub const KEY_PRESSED: u32 = 1 << 0;
 pub const KEY_RELEASED: u32 = 1 << 1;
@@ -29,13 +29,13 @@ pub const MODULE_EVENT: u32 = 1 << 16;
 /// \param event_mask Bitwise-OR of the event constants in this module.
 /// \param action_id  Action id passed back via `plugin_on_action` when an
 ///                   event fires.
-/// \return Subscription id used with [`unsubscribe`], or `None` on error.
-pub fn subscribe(event_mask: u32, action_id: u32) -> Option<u32> {
+/// \return Subscription id used with [`unsubscribe`], or `Err` on error.
+pub fn subscribe(event_mask: u32, action_id: u32) -> Result<u32> {
     let rc = unsafe { ffi::host_event_subscribe(event_mask, action_id) };
     if rc >= 0 {
-        Some(rc as u32)
+        Ok(rc as u32)
     } else {
-        None
+        Err(Error::from_code(rc))
     }
 }
 

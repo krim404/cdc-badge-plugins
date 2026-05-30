@@ -21,7 +21,6 @@
     }
   },
   "capabilities": {
-    "background": true,
     "wifi": true,
     "ble": true,
     "http": true,
@@ -29,6 +28,7 @@
     "sao": true,
     "pixel_strip": true,
     "usb_cdc": true,
+    "vfat": true,
     "nvs_namespace": "plg_sdk_probe",
     "rmem": ["probe"],
     "ecc": ["probe"],
