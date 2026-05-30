@@ -32,17 +32,20 @@ pub struct HostTm {
 extern "C" {
     // Logging
     pub fn host_log(level: u8, tag: *const c_char, msg: *const c_char);
+    pub fn host_log_hex(tag: *const c_char, label: *const c_char, data: *const u8, len: usize);
 
     // Time
     pub fn host_uptime_ms() -> u64;
     pub fn host_unix_time() -> i64;
     pub fn host_local_time(out: *mut HostTm) -> c_int;
+    pub fn host_timezone_offset() -> i32;
     pub fn host_is_time_set() -> bool;
 
     // Power
     pub fn host_battery_mv() -> u16;
     pub fn host_battery_pct() -> u8;
     pub fn host_is_usb_connected() -> bool;
+    pub fn host_power_source() -> u8;
     pub fn host_charge_status() -> u8;
     pub fn host_is_battery_low() -> bool;
     pub fn host_is_battery_critical() -> bool;
@@ -55,6 +58,8 @@ extern "C" {
     pub fn host_nvs_get_u32(key: *const c_char, out: *mut u32) -> c_int;
     pub fn host_nvs_set_u32(key: *const c_char, value: u32) -> c_int;
     pub fn host_nvs_erase(key: *const c_char) -> c_int;
+    pub fn host_nvs_erase_all() -> c_int;
+    pub fn host_nvs_list_keys(out: *mut c_char, out_len: *mut usize) -> c_int;
 
     // UI
     pub fn host_ui_push_toast(text: *const c_char, icon: u8, duration_ms: u16) -> c_int;
@@ -102,6 +107,14 @@ extern "C" {
                                   max_len: u16, action_id: u32) -> c_int;
     pub fn host_ui_consume_input_int(out: *mut i32) -> c_int;
     pub fn host_ui_consume_input_text(out: *mut c_char, out_size: usize) -> c_int;
+    pub fn host_ui_push_date(title: *const c_char, d: u8, m: u8, y: u16, action_id: u32) -> c_int;
+    pub fn host_ui_push_time(title: *const c_char, h: u8, m: u8, action_id: u32) -> c_int;
+    pub fn host_ui_push_pin_entry(title: *const c_char, max_len: u8, max_attempts: u8,
+                                   action_id: u32) -> c_int;
+    pub fn host_ui_acquire_exclusive() -> c_int;
+    pub fn host_ui_release_exclusive() -> c_int;
+    pub fn host_ui_set_inactivity(timeout_ms: u32, action_id: u32) -> c_int;
+    pub fn host_ui_wink(count: u8, period_ms: u16) -> c_int;
 
     // Plugin command channel
     pub fn host_cmd_consume(out: *mut c_char, out_size: usize) -> c_int;
@@ -114,6 +127,10 @@ extern "C" {
     pub fn host_view_canvas_set_footer(hint: *const c_char) -> c_int;
     pub fn host_view_canvas_clear() -> c_int;
     pub fn host_view_canvas_set_text_size(size: u8) -> c_int;
+    pub fn host_view_canvas_set_font(font_id: u8) -> c_int;
+    pub fn host_text_pick_font_that_fits(text: *const c_char, max_width_px: i16,
+                                          candidates: *const u8, count: u32,
+                                          out_font_id: *mut u8) -> c_int;
     pub fn host_view_canvas_set_text_color(inverted: bool) -> c_int;
     pub fn host_view_canvas_draw_text(x: i16, y: i16, text: *const c_char) -> c_int;
     pub fn host_view_canvas_draw_text_aligned(x: i16, y: i16, w: i16,

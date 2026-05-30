@@ -16,14 +16,18 @@ pub const HOST_API_LEVEL_MAJOR: u16 = 0;
 /// \brief Minor part of the host API level this SDK targets.
 pub const HOST_API_LEVEL_MINOR: u16 = 6;
 
+pub mod ble;
 pub mod canvas;
 pub mod cmd;
+pub mod crypto;
+pub mod display;
 pub mod event;
 pub mod ffi;
 pub mod gpio;
 pub mod http;
 pub mod i18n;
 pub mod i2c;
+pub mod keypad;
 pub mod lockscreen;
 pub mod log;
 pub mod nvs;
@@ -31,8 +35,12 @@ pub mod pixel_strip;
 pub mod power;
 pub mod random;
 pub mod rmem;
+pub mod sao;
+pub mod secure_element;
+pub mod sysinfo;
 pub mod time;
 pub mod ui;
+pub mod usb;
 pub mod wifi;
 
 #[cfg(all(feature = "allocator", target_arch = "wasm32"))]

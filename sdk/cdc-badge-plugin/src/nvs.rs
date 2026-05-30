@@ -115,3 +115,36 @@ pub fn erase(key: &str) -> bool {
     let rc = unsafe { ffi::host_nvs_erase(k.as_ptr()) };
     rc == 0
 }
+
+/// \brief Erase every key in the plugin's own NVS namespace.
+///
+/// Scoped to the calling plugin's `plugin_<id>` namespace by the host; it
+/// cannot touch other plugins' data or firmware NVS. Destructive only to
+/// this plugin's own stored values.
+/// \return `true` on success.
+pub fn erase_all() -> bool {
+    let rc = unsafe { ffi::host_nvs_erase_all() };
+    rc == 0
+}
+
+/// \brief Enumerate the keys stored in the plugin's namespace.
+/// \param max_bytes Capacity for the NUL-separated key list returned by the host.
+/// \return The keys, or `None` on failure.
+pub fn list_keys(max_bytes: usize) -> Option<Vec<String>> {
+    let mut buf = Vec::<u8>::with_capacity(max_bytes);
+    let mut len = max_bytes;
+    let rc = unsafe {
+        buf.set_len(max_bytes);
+        ffi::host_nvs_list_keys(buf.as_mut_ptr() as *mut _, &mut len)
+    };
+    if rc != 0 {
+        return None;
+    }
+    buf.truncate(len);
+    let keys = buf
+        .split(|&b| b == 0)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| core::str::from_utf8(s).ok().map(String::from))
+        .collect();
+    Some(keys)
+}

@@ -26,6 +26,17 @@ pub const ALIGN_LEFT: u8 = 0;
 pub const ALIGN_CENTER: u8 = 1;
 pub const ALIGN_RIGHT: u8 = 2;
 
+/// \brief Adafruit-GFX 6x8 builtin; CP437 codepoints for umlauts.
+pub const FONT_BUILTIN: u8 = 0;
+/// \brief FreeMonoBold 9pt; Latin-1 indexed.
+pub const FONT_BOLD_9PT: u8 = 1;
+/// \brief FreeMonoBold 12pt; Latin-1 indexed.
+pub const FONT_BOLD_12PT: u8 = 2;
+/// \brief FreeMonoBold 18pt; ASCII only.
+pub const FONT_BOLD_18PT: u8 = 3;
+/// \brief FreeMonoBold 24pt; ASCII only.
+pub const FONT_BOLD_24PT: u8 = 4;
+
 /// \brief Push a fresh canvas view onto the badge view stack.
 ///
 /// \param title Header title (empty for no header bar).
@@ -65,6 +76,44 @@ pub fn clear() {
 /// \brief Set the text size used by subsequent text draws (1..3).
 pub fn set_text_size(size: u8) {
     unsafe { ffi::host_view_canvas_set_text_size(size) };
+}
+
+/// \brief Switch the canvas font to one of the `FONT_*` ids.
+///
+/// Persists until the next [`clear`] or `set_font` call.
+/// \param font_id One of the `FONT_*` constants.
+/// \return `true` on success, `false` for an out-of-range id.
+pub fn set_font(font_id: u8) -> bool {
+    unsafe { ffi::host_view_canvas_set_font(font_id) == ffi::HOST_OK }
+}
+
+/// \brief Pick the largest candidate font whose rendered `text` fits within
+///        `max_width_px`.
+///
+/// Pure measurement; does not change canvas state. Pair with [`set_font`]
+/// to apply the result. Candidates are evaluated in array order, so sort
+/// them largest to smallest; the last entry is the fallback.
+/// \param text         String to measure.
+/// \param max_width_px Pixel budget.
+/// \param candidates   `FONT_*` ids to consider.
+/// \return The chosen font id, or `None` on invalid input.
+pub fn pick_font_that_fits(text: &str, max_width_px: i16, candidates: &[u8]) -> Option<u8> {
+    let c = CString::new(text).ok()?;
+    let mut out: u8 = 0;
+    let rc = unsafe {
+        ffi::host_text_pick_font_that_fits(
+            c.as_ptr(),
+            max_width_px,
+            candidates.as_ptr(),
+            candidates.len() as u32,
+            &mut out,
+        )
+    };
+    if rc == ffi::HOST_OK {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// \brief Set text color (true = white text for use over black bg).

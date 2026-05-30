@@ -21,6 +21,24 @@ pub fn usb_connected() -> bool {
     unsafe { ffi::host_is_usb_connected() }
 }
 
+/// \brief Active power source as reported by the firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PowerSource {
+    Battery,
+    Usb,
+    Unknown,
+}
+
+/// \brief Read the active power source.
+/// \return The source as a [`PowerSource`] variant.
+pub fn power_source() -> PowerSource {
+    match unsafe { ffi::host_power_source() } {
+        1 => PowerSource::Battery,
+        2 => PowerSource::Usb,
+        _ => PowerSource::Unknown,
+    }
+}
+
 /// \brief Whether the battery is below the warn threshold.
 /// \return `true` when the firmware flags the battery as low.
 pub fn battery_low() -> bool {

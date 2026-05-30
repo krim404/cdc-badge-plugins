@@ -495,3 +495,73 @@ pub fn consume_input_text(max_len: usize) -> Option<alloc::string::String> {
     buf.truncate(end);
     alloc::string::String::from_utf8(buf).ok()
 }
+
+/// \brief Push a date picker view.
+///
+/// Fires `action_id` on confirm; read the packed value via
+/// [`consume_input_int`] (the host encodes the picked date).
+/// \param title     View header text.
+/// \param day       Initial day (1-31).
+/// \param month     Initial month (1-12).
+/// \param year      Initial year.
+/// \param action_id Action id echoed back to the plugin.
+pub fn push_date(title: &str, day: u8, month: u8, year: u16, action_id: u32) {
+    let Ok(t) = CString::new(title) else { return };
+    unsafe {
+        ffi::host_ui_push_date(t.as_ptr(), day, month, year, action_id);
+    }
+}
+
+/// \brief Push a time-of-day picker view.
+/// \param title     View header text.
+/// \param hour      Initial hour (0-23).
+/// \param minute    Initial minute (0-59).
+/// \param action_id Action id echoed back to the plugin.
+pub fn push_time(title: &str, hour: u8, minute: u8, action_id: u32) {
+    let Ok(t) = CString::new(title) else { return };
+    unsafe {
+        ffi::host_ui_push_time(t.as_ptr(), hour, minute, action_id);
+    }
+}
+
+/// \brief Push a numeric PIN entry view.
+/// \param title        View header text.
+/// \param max_len      Number of PIN digits.
+/// \param max_attempts Allowed attempts; `0` for unlimited.
+/// \param action_id    Action id echoed back to the plugin.
+pub fn push_pin_entry(title: &str, max_len: u8, max_attempts: u8, action_id: u32) {
+    let Ok(t) = CString::new(title) else { return };
+    unsafe {
+        ffi::host_ui_push_pin_entry(t.as_ptr(), max_len, max_attempts, action_id);
+    }
+}
+
+/// \brief Claim exclusive UI ownership, blocking other plugins from pushing views.
+/// \return `true` on success.
+pub fn acquire_exclusive() -> bool {
+    unsafe { ffi::host_ui_acquire_exclusive() == ffi::HOST_OK }
+}
+
+/// \brief Release a previously acquired exclusive UI lock.
+/// \return `true` on success.
+pub fn release_exclusive() -> bool {
+    unsafe { ffi::host_ui_release_exclusive() == ffi::HOST_OK }
+}
+
+/// \brief Arm an inactivity timer for the plugin's current view.
+/// \param timeout_ms Idle time before firing.
+/// \param action_id  Action fired when no input arrives within `timeout_ms`.
+pub fn set_inactivity(timeout_ms: u32, action_id: u32) {
+    unsafe {
+        ffi::host_ui_set_inactivity(timeout_ms, action_id);
+    }
+}
+
+/// \brief Blink the backlight as a visual identification signal.
+/// \param count     On/off cycles, clamped by the host to 1..10 (`0` = default 2).
+/// \param period_ms Duration of each phase, clamped to 50..1000 (`0` = default 150).
+pub fn wink(count: u8, period_ms: u16) {
+    unsafe {
+        ffi::host_ui_wink(count, period_ms);
+    }
+}

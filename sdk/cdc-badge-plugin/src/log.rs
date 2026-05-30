@@ -52,3 +52,21 @@ pub fn debug(tag: &str, msg: &str) {
 pub fn verbose(tag: &str, msg: &str) {
     log_with(ffi::LOG_LEVEL_VERBOSE, tag, msg);
 }
+
+/// \brief Write a labelled hex dump of a binary buffer at debug level.
+/// \param tag   Short module/area tag shown in the badge log.
+/// \param label Human-readable label printed before the dump.
+/// \param data  Bytes to dump.
+pub fn hex(tag: &str, label: &str, data: &[u8]) {
+    let tag_c = match CString::new(tag) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let label_c = match CString::new(label) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    unsafe {
+        ffi::host_log_hex(tag_c.as_ptr(), label_c.as_ptr(), data.as_ptr(), data.len());
+    }
+}

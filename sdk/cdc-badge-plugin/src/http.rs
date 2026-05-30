@@ -80,6 +80,12 @@ impl Request {
         Ok(status)
     }
 
+    /// \brief Response Content-Length advertised by the server.
+    /// \return The byte count, or `0` when unknown or chunked.
+    pub fn content_length(&self) -> usize {
+        unsafe { host_http_content_length(self.handle) }
+    }
+
     /// \brief Read the entire response body into a UTF-8 string.
     ///
     /// Internally streams the response in 1 KiB chunks; suitable for
@@ -120,5 +126,6 @@ extern "C" {
     fn host_http_perform(h: c_int) -> c_int;
     fn host_http_status(h: c_int) -> c_int;
     fn host_http_read_chunk(h: c_int, buf: *mut u8, buf_size: usize) -> c_int;
+    fn host_http_content_length(h: c_int) -> usize;
     fn host_http_close(h: c_int) -> c_int;
 }

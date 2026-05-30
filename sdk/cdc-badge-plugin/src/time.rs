@@ -21,6 +21,12 @@ pub fn is_time_set() -> bool {
     unsafe { ffi::host_is_time_set() }
 }
 
+/// \brief Configured timezone offset from UTC.
+/// \return Offset in seconds (east of UTC positive).
+pub fn timezone_offset() -> i32 {
+    unsafe { ffi::host_timezone_offset() }
+}
+
 /// \brief Decomposed local time fields.
 #[derive(Debug, Clone, Copy)]
 pub struct LocalTime {

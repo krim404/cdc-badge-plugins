@@ -261,26 +261,38 @@ bool     host_rmem_name_used   (const char* name);
 /// \brief Maximum payload bytes per rmem slot.
 uint16_t host_rmem_slot_size   (void);
 
-/// \brief Generate a fresh ECC key on the chip into the given slot.
-int      host_ecc_generate (uint8_t slot, uint8_t curve);
+/*
+ * ECC keys are addressed by name, not by physical slot. The host maps each
+ * declared name (manifest `capabilities.ecc`) to a slot in a reserved plugin
+ * ECC pool and persists the mapping in NVS, so a key keeps its slot across
+ * reboot and reinstall. The pool is small (ECC slots are scarce and reserved
+ * for firmware features such as attestation and WebAuthn); growing it is a
+ * firmware change.
+ *
+ * Name length: max HOST_ECC_NAME_MAX bytes excluding the trailing NUL.
+ */
+#define HOST_ECC_NAME_MAX 15
 
-/// \brief Import an externally-generated private key into an ECC slot.
-int      host_ecc_import   (uint8_t slot, const uint8_t* priv, uint8_t curve);
+/// \brief Generate a fresh ECC key for the named slot.
+int      host_ecc_generate (const char* name, uint8_t curve);
 
-/// \brief Export the public key for the key in `slot`.
-int      host_ecc_pubkey   (uint8_t slot, uint8_t* pub, uint8_t curve);
+/// \brief Import an externally-generated private key for the named slot.
+int      host_ecc_import   (const char* name, const uint8_t* priv, uint8_t curve);
 
-/// \brief Erase an ECC slot.
-int      host_ecc_delete   (uint8_t slot);
+/// \brief Export the public key for the named slot.
+int      host_ecc_pubkey   (const char* name, uint8_t* pub, uint8_t curve);
 
-/// \brief True when the ECC slot currently holds a key.
-bool     host_ecc_slot_used(uint8_t slot);
+/// \brief Erase the named ECC key and free its pool slot.
+int      host_ecc_delete   (const char* name);
 
-/// \brief ECDSA-sign `msg` with the P-256 key in `slot`; writes 64-byte raw sig.
-int      host_ecdsa_sign   (uint8_t slot, const uint8_t* msg, size_t len, uint8_t sig[64]);
+/// \brief True when the named ECC key currently holds a key.
+bool     host_ecc_exists   (const char* name);
 
-/// \brief Ed25519-sign `msg` with the key in `slot`; writes 64-byte signature.
-int      host_eddsa_sign   (uint8_t slot, const uint8_t* msg, size_t len, uint8_t sig[64]);
+/// \brief ECDSA-sign `msg` with the P-256 named key; writes 64-byte raw sig.
+int      host_ecdsa_sign   (const char* name, const uint8_t* msg, size_t len, uint8_t sig[64]);
+
+/// \brief Ed25519-sign `msg` with the named key; writes 64-byte signature.
+int      host_eddsa_sign   (const char* name, const uint8_t* msg, size_t len, uint8_t sig[64]);
 
 /**
  * \brief Read the TROPIC01 chip serial / identity blob.

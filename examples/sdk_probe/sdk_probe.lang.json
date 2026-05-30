@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "translations": {
+    "de": {
+      "meta.name": "SDK-Probe",
+      "meta.description": "Serielle Diagnose, die jede SDK-Bindung einmal ausführt.",
+      "running": "SDK-Probe läuft...",
+      "done": "SDK-Probe fertig"
+    }
+  }
+}
