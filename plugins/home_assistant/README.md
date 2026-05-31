@@ -9,8 +9,8 @@ Full WASM port of the native `mod_homeassistant`, targeting host API v0.5.
 
 ## Configuration
 
-Before starting the plugin, configure URL + long-lived access token on the
-badge:
+Configure the server URL and long-lived access token on the badge via the
+plugin's setup menu (press `3`):
 
 - The URL is stored in NVS under namespace `plugin_ha`, key `url`.
 - The token is stored in the named rmem slot `ha_token` (allocated from the
@@ -18,22 +18,10 @@ badge:
   and plugin reinstall as long as `"ha_token"` stays declared in
   `capabilities.rmem`.
 
-Until the on-badge setup view ships, seed both via the host serial console.
+Build and install: see [Getting Started](../../docs/getting_started.md). The
+plugin lives in `plugins/home_assistant/`.
 
-## Build
-
-```bash
-cargo build --release --target wasm32-unknown-unknown -p home_assistant
-wasm-opt -Oz target/wasm32-unknown-unknown/release/home_assistant.wasm -o ha.wasm
-```
-
-## Install
-
-```bash
-python tools/upload_plugin.py --wasm ha.wasm --meta examples/home_assistant/meta.json
-```
-
-Open **Tools → Plugins → Home Assistant** on the badge.
+Open **Plugins -> Home Assistant** on the badge.
 
 ## Capabilities used
 

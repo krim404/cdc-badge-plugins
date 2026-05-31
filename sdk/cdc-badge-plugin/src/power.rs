@@ -51,6 +51,16 @@ pub fn battery_critical() -> bool {
     unsafe { ffi::host_is_battery_critical() }
 }
 
+/// \brief Hold or release a light-sleep inhibitor for this plugin.
+///
+/// While held the badge will not enter light sleep, so a background plugin
+/// keeps ticking (e.g. to drive an LED animation). The inhibitor is keyed by
+/// the plugin id and released automatically when the plugin is unloaded.
+/// \param on `true` to inhibit light sleep, `false` to release.
+pub fn set_sleep_inhibit(on: bool) {
+    unsafe { ffi::host_set_sleep_inhibit(on as u32) }
+}
+
 /// \brief Charge-controller state as reported by the firmware.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChargeStatus {

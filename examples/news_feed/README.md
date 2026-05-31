@@ -21,27 +21,13 @@ in NVS and editable on the badge.
   "wifi":           true,
   "http":           true,
   "ui_exclusive":   true,
-  "nvs_namespace":  "plugin_news_feed"
+  "nvs_namespace":  "plg_news_feed"
 }
 ```
 
 `prerequisites.wifi_connected` makes the host bring WiFi up before
 `plugin_on_enter`.
 
-## Build
+Build and install: see [Getting Started](../../docs/getting_started.md).
 
-```bash
-cargo build --release --target wasm32-unknown-unknown -p news_feed
-wasm-opt -Oz target/wasm32-unknown-unknown/release/news_feed.wasm -o news_feed.wasm
-```
-
-## Install
-
-```bash
-python tools/upload_plugin.py \
-  --wasm news_feed.wasm \
-  --meta examples/news_feed/meta.json \
-  --lang examples/news_feed/news_feed.lang.json
-```
-
-Open **Tools → Plugins → News Feed** on the badge.
+Open **Plugins -> News Feed** on the badge.

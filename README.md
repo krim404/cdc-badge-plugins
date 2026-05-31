@@ -8,6 +8,8 @@ Plugins run inside a sandboxed WAMR runtime on the badge and interact with the f
 
 Pre-alpha. Host API Level `0.6`. Breaking changes between minor versions until `1.0`.
 
+> ⚠️ The BLE host API (`ble` capability: GATT peripheral and central) is **work in progress and untested on hardware**. Treat all BLE functions as experimental.
+
 ## Repository Layout
 
 ```
@@ -50,6 +52,8 @@ examples but still framed as reference implementations.
 |--------|--------------|--------------|
 | `grove_led` | `background`, `pixel_strip`, `nvs_namespace` | Controls a WS2813 strip on the Grove port. Settings menu for count, brightness, color, and effects (rainbow, static, blink, breathing). Runs in the background. |
 | `home_assistant` | `wifi`, `http`, `rmem` (token), `nvs_namespace` | Toggles a curated list of Home Assistant lights and switches via the REST API. Settings menu, favorites flow, token stored in secure memory. Long-lived access tokens are unpleasant to type on T9, so paste them over serial with `PASTE <token>` while the API-key input field is open on the badge. |
+| `ble_scanner` | `ble`, `prevent_sleep`, `vfat` | ⚠️ **WIP, untested.** Continuously scans for BLE devices, sorted by RSSI with a per-device sighting counter. |
+| `sdk_probe` | (many) | Serial diagnostic that exercises every SDK binding once. Reference for the full capability surface. |
 
 #### A note on `home_assistant`
 
@@ -63,25 +67,11 @@ slice (a handful of switchable entities, REST authentication, persistent
 favorites) to demonstrate how a real-world networked plugin is structured.
 Treat it as a recipe to adapt, not a product.
 
-## Quickstart (Rust)
+## Quickstart
 
-```bash
-rustup target add wasm32-unknown-unknown
-cargo new --bin my_plugin
-# Copy sdk/plugin_template_rust/Cargo.toml as starting point
-cargo build --release --target wasm32-unknown-unknown
-wasm-opt -Oz target/wasm32-unknown-unknown/release/my_plugin.wasm -o my_plugin.wasm
-```
-
-Upload to the badge with the Python tool from the firmware repo, or use the [web installer](https://krim404.github.io/cdc-badge-plugins/).
-
-## Host API Level Compatibility
-
-| Firmware version | Host API Level |
-|------------------|----------------|
-| `0.6.x`          | `0.6`          |
-
-A plugin declares the minimum host API level it needs in its `meta.json`. The badge refuses to load plugins that need a higher minor than the firmware provides, or any other major.
+Copy `sdk/plugin_template_rust/` to a new directory, rename `my_plugin`, edit
+`meta.json`, then build and install. The full build and install flow lives in
+[docs/getting_started.md](docs/getting_started.md).
 
 ## Host API Reference
 
@@ -89,20 +79,12 @@ The canonical contract between plugin and firmware is
 [`sdk/host_api.h`](sdk/host_api.h) - mirrored byte-identical from
 [the firmware repo's source](https://github.com/krim404/cdc-badge-os/blob/release/components/plugin_manager/include/plugin_manager/host_api.h)
 by a CI drift check. The Rust SDK auto-derives its constants from this file
-via `build.rs`, so there is one source of truth.
+via `build.rs`, so there is one source of truth. The compatibility rule and
+return codes are documented in [docs/host_api_reference.md](docs/host_api_reference.md).
 
 Browsable HTML reference (rendered from `host_api.h` by Doxygen, refreshed on
 every firmware push):
 **https://krim404.github.io/cdc-badge-os/docs/host__api_8h.html**
-
-Start there to see every available host function with its `\brief`,
-parameters and return semantics, grouped by area (logging, time, power,
-crypto, secure element, HTTP, Wi-Fi, NVS, UI views, canvas, low-level GFX,
-i18n, events, keypad, USB, sysinfo, GPIO, pixel strip, BLE).
-
-## Firmware build prerequisites
-
-Plugins built with recent Rust toolchains emit bulk-memory WASM ops (`memory.copy`, `memory.fill`). The firmware's WAMR runtime must be compiled with `WAMR_BUILD_BULK_MEMORY=1` (default in ESP-IDF setups) or plugins will fail to instantiate.
 
 ## License
 

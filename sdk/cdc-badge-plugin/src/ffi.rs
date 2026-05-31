@@ -49,6 +49,7 @@ extern "C" {
     pub fn host_charge_status() -> u8;
     pub fn host_is_battery_low() -> bool;
     pub fn host_is_battery_critical() -> bool;
+    pub fn host_set_sleep_inhibit(on: u32);
 
     // NVS
     pub fn host_nvs_get_blob(key: *const c_char, buf: *mut u8, buf_size: usize) -> c_int;

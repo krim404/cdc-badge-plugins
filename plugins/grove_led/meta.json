@@ -27,6 +27,7 @@
       "effect_blink":     { "en": "Blink" },
       "effect_breathing": { "en": "Breathing" },
       "effect_random":    { "en": "Random" },
+      "effect_cpuload":   { "en": "CPU Load" },
       "label_r": { "en": "Red" },
       "label_g": { "en": "Green" },
       "label_b": { "en": "Blue" },
@@ -37,6 +38,7 @@
   },
   "capabilities": {
     "background": true,
+    "autoload": true,
     "pixel_strip": true,
     "ui_exclusive": false,
     "nvs_namespace": "plg_grove_led"

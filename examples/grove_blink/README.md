@@ -10,9 +10,6 @@ Showcases:
 
 Wire any LED + resistor between Grove SIG0 (the white wire on the Grove connector) and GND.
 
-## Build
+Build and install: see [Getting Started](../../docs/getting_started.md).
 
-```bash
-cargo build --release --target wasm32-unknown-unknown -p grove_blink
-wasm-opt -Oz target/wasm32-unknown-unknown/release/grove_blink.wasm -o grove_blink.wasm
-```
+Open **Plugins -> Grove Blink** on the badge.

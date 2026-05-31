@@ -26,6 +26,15 @@ The Rust `plugin_main!()` macro generates the API-level exports for you.
 | `plugin_on_cmd(len)` | The host forwarded a command string (e.g. `PLUGIN CMD <id> <args>`); pull it with `cmd::consume` / `host_cmd_consume`. |
 | `plugin_on_prerequisite_failed(prereq_id, error_code)` | A prerequisite with `on_fail=callback` failed. |
 
+## Autoload (resident at boot)
+
+A plugin with the `autoload` capability is started as a resident background
+instance at badge boot. The host calls `plugin_init` and walks the
+prerequisites, but does **not** call `plugin_on_enter`: the plugin runs
+headless with no foreground view until the user opens it. `autoload` is
+orthogonal to `background` (which only governs survival after the user leaves a
+foreground plugin). See [Capabilities](capabilities.md).
+
 ## Prerequisite-controlled startup
 
 Before calling `plugin_on_enter()`, the host walks the `prerequisites` list from the manifest in order. For each entry:

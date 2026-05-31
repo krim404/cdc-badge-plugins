@@ -37,9 +37,19 @@ pub fn build_profile() -> Option<String> {
     read_str(32, |p, n| unsafe { host_get_build_profile(p, n) })
 }
 
+/// \brief Aggregate CPU load across all cores as 0..100 percent.
+///
+/// Sampled on demand and refreshed at most a few times per second, so calling
+/// this every frame is cheap and returns a stable value between refreshes.
+/// \return Current CPU load percentage (0..100).
+pub fn cpu_load() -> u8 {
+    unsafe { host_cpu_load() }
+}
+
 #[link(wasm_import_module = "cdc")]
 extern "C" {
     fn host_feature_enabled(feature_id: u16) -> bool;
     fn host_get_firmware_version(out: *mut c_char, out_size: usize) -> c_int;
     fn host_get_build_profile(out: *mut c_char, out_size: usize) -> c_int;
+    fn host_cpu_load() -> u8;
 }

@@ -12,7 +12,7 @@ extern crate alloc;
 
 use alloc::format;
 use cdc_badge_plugin::{
-    event, gpio, i18n, lockscreen, log, nvs, pixel_strip, plugin_main,
+    event, gpio, i18n, lockscreen, log, nvs, pixel_strip, plugin_main, power, sysinfo,
     ui::{self, ListBuilder, SliderBuilder},
 };
 
@@ -65,6 +65,7 @@ enum Effect {
     Blink = 2,
     Breathing = 3,
     Random = 4,
+    CpuLoad = 5,
 }
 
 impl Effect {
@@ -74,6 +75,7 @@ impl Effect {
             2 => Effect::Blink,
             3 => Effect::Breathing,
             4 => Effect::Random,
+            5 => Effect::CpuLoad,
             _ => Effect::Rainbow,
         }
     }
@@ -148,6 +150,16 @@ fn load_state() {
     if let Some(v) = nvs::get_u32(NVS_B)       { s().b = v as u8; }
     if let Some(v) = nvs::get_u32(NVS_EFFECT)  { s().effect = Effect::from_u8(v as u8); }
     if let Some(v) = nvs::get_u32(NVS_SPEED)   { s().speed = (v as u8).clamp(1, 100); }
+}
+
+/// \brief Hold a light-sleep inhibitor only while an animated effect runs with
+///        the LEDs on. A static colour latches in the strip and survives light
+///        sleep, so it needs no inhibitor; disabling the LEDs releases it.
+fn update_caffeinate() {
+    // Animated effects need the CPU awake; Static latches and survives sleep,
+    // and CpuLoad explicitly permits sleep (an idle/asleep CPU is "no load").
+    let needs_cpu = s().effect != Effect::Static && s().effect != Effect::CpuLoad;
+    power::set_sleep_inhibit(s().enabled && needs_cpu);
 }
 
 fn phase_divisor() -> u64 {
@@ -281,22 +293,57 @@ fn render_frame(uptime_ms: u64) {
             }
             for i in max_idx..strip_len { let _ = pixel_strip::set(i, 0, 0, 0); }
         }
+        Effect::CpuLoad => {
+            // Server-rack activity look: every LED flickers independently in the
+            // picked colour. CPU load raises both the change rate and how many
+            // LEDs are lit, so idle = sparse slow blips, busy = dense fast churn.
+            let load = sysinfo::cpu_load() as u64;
+            let interval = 600u64.saturating_sub(load * 5).max(50);  // 600..100 ms
+            let threshold = 25 + load * 55 / 100;                    // ~25..80 % lit
+            let (on_r, on_g, on_b) = (apply_brightness(r, brightness),
+                                      apply_brightness(g, brightness),
+                                      apply_brightness(b, brightness));
+            for i in 0..max_idx {
+                // Per-LED staggered bucket -> each pixel re-rolls on its own clock.
+                let bucket = (uptime_ms + (i as u64) * 37) / interval;
+                let mut rng = bucket ^ (i as u64).wrapping_add(1).wrapping_mul(0x9E3779B97F4A7C15);
+                if rng == 0 { rng = 0x9E3779B97F4A7C15; }
+                let on = (xorshift64(&mut rng) % 100) < threshold;
+                let (rr, gg, bb) = if on { (on_r, on_g, on_b) } else { (0, 0, 0) };
+                let _ = pixel_strip::set(i, rr, gg, bb);
+            }
+            for i in max_idx..strip_len { let _ = pixel_strip::set(i, 0, 0, 0); }
+        }
     }
     let _ = pixel_strip::refresh();
 }
 
 // --- Menus ----------------------------------------------------------------
 
-fn show_top_menu() {
-    let toggle_label = format!(
+/// \brief Label for the enable/disable row, e.g. "LEDs: On".
+fn toggle_label() -> alloc::string::String {
+    format!(
         "{}: {}",
         i18n::tr_key("menu_enable"),
         if s().enabled { i18n::tr_core("core.on") } else { i18n::tr_core("core.off") },
-    );
+    )
+}
 
+/// \brief Icon for the enable/disable row reflecting the current state.
+fn toggle_icon() -> u8 {
+    if s().enabled { ui::UI_ICON_SUCCESS } else { ui::UI_ICON_CIRCLE }
+}
+
+/// \brief Refresh just the toggle row in place, instead of re-pushing the whole
+///        list (which would grow the view stack on every on/off toggle).
+fn refresh_toggle_row() {
+    ui::update_list_item(ITEM_TOGGLE as u16, toggle_label(), ITEM_TOGGLE, toggle_icon());
+}
+
+fn show_top_menu() {
     ListBuilder::new(i18n::tr_meta("name"))
         .on_select(ACT_TOP_SELECT)
-        .item(&toggle_label, ITEM_TOGGLE, if s().enabled { ui::UI_ICON_SUCCESS } else { ui::UI_ICON_CIRCLE })
+        .item(&toggle_label(), ITEM_TOGGLE, toggle_icon())
         .item(i18n::tr_key("menu_count"),  ITEM_COUNT,  ui::UI_ICON_BAR)
         .item(i18n::tr_core("core.brightness"), ITEM_BRIGHT, ui::UI_ICON_SUN)
         .item(i18n::tr_key("menu_color"),  ITEM_COLOR,  ui::UI_ICON_DIAMOND)
@@ -336,6 +383,7 @@ fn show_effect_menu() {
         .item(i18n::tr_key("effect_blink"),     2, ui::UI_ICON_ALERT)
         .item(i18n::tr_key("effect_breathing"), 3, ui::UI_ICON_UPDOWN)
         .item(i18n::tr_key("effect_random"),    4, ui::UI_ICON_ALERT)
+        .item(i18n::tr_key("effect_cpuload"),   5, ui::UI_ICON_BAR)
         .push();
 }
 
@@ -359,6 +407,7 @@ pub extern "C" fn plugin_init() -> i32 {
     }
     let _ = event::subscribe(event::SYSTEM_SLEEP | event::SYSTEM_WAKE, ACT_EVENT);
     let _ = lockscreen::register("menu_enable", ACT_LOCK_TOGGLE);
+    update_caffeinate();
     log::info(TAG, "grove_led initialised");
     0
 }
@@ -421,6 +470,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
                 let _ = pixel_strip::clear();
                 let _ = pixel_strip::refresh();
             }
+            update_caffeinate();
         }
         ACT_EVENT => match idx {
             ET_SYSTEM_SLEEP => {
@@ -439,7 +489,8 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
                     let _ = pixel_strip::clear();
                     let _ = pixel_strip::refresh();
                 }
-                show_top_menu();
+                update_caffeinate();
+                refresh_toggle_row();
             }
             ITEM_COUNT  => show_count_slider(),
             ITEM_BRIGHT => show_bright_slider(),
@@ -474,12 +525,14 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
                 let _ = nvs::set_u32(NVS_G, s().g as u32);
                 let _ = nvs::set_u32(NVS_B, s().b as u32);
                 let _ = nvs::set_u32(NVS_EFFECT, s().effect as u32);
+                update_caffeinate();
                 toast_saved();
             }
         }
         ACT_EFFECT_SELECT => {
             s().effect = Effect::from_u8(idx as u8);
             let _ = nvs::set_u32(NVS_EFFECT, s().effect as u32);
+            update_caffeinate();
             toast_saved();
         }
         ACT_SPEED_SAVE => {

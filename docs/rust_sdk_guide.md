@@ -1,6 +1,8 @@
 # Rust SDK Guide
 
-The `cdc-badge-plugin` crate provides safe Rust wrappers over the host API.
+The `cdc-badge-plugin` crate provides safe Rust wrappers over the host API. A
+plugin is a `cdylib` with `#[no_mangle]` lifecycle exports, not a binary. For
+the build and install flow see [getting_started.md](getting_started.md).
 
 ## Cargo dependency
 
@@ -36,6 +38,11 @@ pub extern "C" fn plugin_on_enter() -> i32 {
 
 ## Modules in the crate
 
+Highlights below. The crate also has `canvas`, `cmd`, `crypto`, `display`,
+`fs`, `gpio`, `http`, `i2c`, `keypad`, `lockscreen`, `pixel_strip`, `random`,
+`rmem`, `sao`, `secure_element`, `sysinfo`, `usb`, and `wifi`. See the
+generated crate docs (`cargo doc -p cdc-badge-plugin --open`) for the full API.
+
 | Module | Use |
 |--------|-----|
 | `ffi` | Raw `extern "C"` declarations. Stick to the safe wrappers above this unless you really need it. |
@@ -46,7 +53,7 @@ pub extern "C" fn plugin_on_enter() -> i32 {
 | `nvs` | Per-plugin namespaced key/value. `get_blob/set_blob/get_str/set_str/get_u32/set_u32`. |
 | `i18n` | `i18n::tr_key(...)`, `i18n::current_language()` |
 | `event` | Subscribe to EventBus events with an action id. |
-| `ble` | GATT peripheral (publish a service with characteristics) and central (scan/connect/discover/read/write/subscribe). Inbound events fire an action id; pull the payload with the matching `consume_*`. Needs `ble: true`. |
+| `ble` | ⚠️ **WIP, untested on hardware.** GATT peripheral (publish a service with characteristics) and central (scan/connect/discover/read/write/subscribe). Inbound events fire an action id; pull the payload with the matching `consume_*`. Needs `ble: true`. |
 
 ## Error handling
 

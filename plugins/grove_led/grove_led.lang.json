@@ -15,6 +15,7 @@
       "effect_blink": "Blinken",
       "effect_breathing": "Atmen",
       "effect_random": "Zufall",
+      "effect_cpuload": "CPU-Last",
       "label_r": "Rot",
       "label_g": "Grün",
       "label_b": "Blau",

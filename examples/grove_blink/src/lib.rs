@@ -5,7 +5,7 @@
 //! loop. Y picks the toggle item, N exits the plugin.
 //!
 //! New concepts compared to `battery_widget`:
-//!   - declaring and using a capability (`gpio_out`) in `meta.json`,
+//!   - declaring and using a capability (`grove`) in `meta.json`,
 //!   - holding mutable plugin state across callbacks with a `static`,
 //!   - building an interactive list view with `ui::ListBuilder`,
 //!   - reacting to a user selection through `plugin_on_action`.
@@ -72,7 +72,7 @@ fn state() -> bool {
 #[no_mangle]
 pub extern "C" fn plugin_init() -> i32 {
     // Ask the host to switch the pin to output mode. This fails if the
-    // plugin manifest does not declare the `gpio_out` capability for
+    // plugin manifest does not declare the `grove` capability for
     // this pin, or if another plugin already claimed it.
     if gpio::set_direction(PIN, gpio::Direction::Output).is_err() {
         log::error(TAG, "GPIO setup failed - missing capability?");

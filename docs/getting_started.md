@@ -20,6 +20,12 @@ cargo build --release --target wasm32-unknown-unknown -p hello_world
 ls target/wasm32-unknown-unknown/release/hello_world.wasm
 ```
 
+Optionally shrink the result with `wasm-opt`:
+
+```bash
+wasm-opt -Oz target/wasm32-unknown-unknown/release/hello_world.wasm -o hello_world.wasm
+```
+
 ## 3. Start your own plugin
 
 Copy `sdk/plugin_template_rust/` to a new directory, rename `my_plugin` in the four places that mention it, and edit `meta.json`.
@@ -37,7 +43,7 @@ Two options:
 
 **B) Python tool** (from the cdc-badge-os repo):
 ```bash
-python tools/upload_plugin.py --wasm hello_world.wasm --meta path/to/meta.json
+python tools/upload.py --wasm hello_world.wasm --meta path/to/meta.json
 ```
 
 ## 5. Run it

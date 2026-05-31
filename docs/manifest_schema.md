@@ -6,12 +6,12 @@ Every plugin ships a JSON manifest next to its `.wasm`. The host parses it at lo
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | string | yes | Lowercase, `[a-z][a-z0-9_]{1,31}`. Used as filename stem and NVS namespace. |
+| `id` | string | yes | Used as filename stem. By convention lowercase `[a-z][a-z0-9_]*`; the parser only requires it to be non-empty. |
 | `version` | string | yes | SemVer `MAJOR.MINOR.PATCH`. |
 | `author` | string | no | Free text. |
 | `icon` | string | no | Built-in icon identifier (`info`, `battery`, `ha`, ...). |
 | `host_api_level_min` | string | yes | Minimum host API level required, `MAJOR.MINOR`. |
-| `linear_memory_kb` | int | yes | WAMR linear memory size, 16-1024 KB. |
+| `linear_memory_kb` | int | yes | WAMR linear memory size, 16-4096 KB. |
 | `i18n` | object | no | Localised strings (see below). |
 | `capabilities` | object | no | What the plugin is allowed to do. |
 | `prerequisites` | object | no | What the host must establish before running the plugin. |
@@ -36,50 +36,46 @@ Plugin code looks them up with `host_i18n_tr_key("save")` or `host_i18n_tr_meta(
 
 ## capabilities
 
+The `capabilities` object is a flat map. See [Capabilities](capabilities.md)
+for what each one allows, how it is enforced, and the behavioral flags
+(`background`, `autoload`, `prevent_sleep`).
+
 ```json
 "capabilities": {
   "wifi": true,
   "ble": false,
+  "http": true,
+  "ui_exclusive": true,
+  "display_lowlevel": false,
+  "usb_cdc": false,
+  "vfat": false,
+  "pixel_strip": false,
+  "background": true,
+  "autoload": false,
+  "prevent_sleep": true,
+  "grove": false,
+  "sao": false,
   "rmem": ["ha_token"],
   "ecc": ["signing_key"],
   "ble_service_uuids": [],
-  "nvs_namespace": "plugin_ha",
-  "http": true,
-  "display_lowlevel": false,
-  "ui_exclusive": true,
-  "background": true,
-  "prevent_sleep": true
+  "gpio_pins": [],
+  "pwm_pins": [],
+  "adc_pins": [],
+  "i2c_bus": [],
+  "nvs_namespace": "plugin_ha"
 }
 ```
 
-`background` keeps the plugin loaded and ticking (`plugin_on_tick`) after the
-user leaves it. `prevent_sleep` stops the badge from entering the lock-screen
-light sleep while the plugin is loaded; see [Capabilities](capabilities.md).
-
-`rmem` is a list of slot names (1-15 chars each). The host allocates a
-physical slot from the plugin pool (TROPIC01 R-Mem slots 501-511) on first
-write and persists the association in the slot header. Two plugins
-declaring the same name share the same physical slot (intentional, common
-scope). Calls to capabilities that were not declared return
-`HOST_ERR_NO_CAPABILITY`. System slots (PIN hashes, FIDO2 keys, GPG keys,
-TOTP secrets, password vault) live outside the plugin pool and are not
-addressable from a plugin under any circumstance.
-
-`ecc` is a list of ECC key names (1-15 chars each), addressed by name exactly
-like `rmem`. The host maps each declared name to a slot in a small reserved
-plugin ECC pool and persists the mapping in NVS, so a key keeps its slot across
-reboot and reinstall; plugins never reference a physical slot number. The pool
-is intentionally tiny (firmware features such as attestation and WebAuthn own
-the scarce TROPIC01 slots), so only a limited number of plugin ECC keys can be
-live at once.
-
-`nvs_namespace` **must start with `plg_` or `plugin_`** (lowercase, digits
-and underscore only, 15-char NVS hard limit). The prefix is enforced both
-by the manifest validator and at runtime by the host so a plugin cannot
-declare a namespace like `nvs.net80211` and read the WiFi-credential
-`sta.pswd` out of system NVS, nor stomp on `wifi` / `display` / other
-firmware-owned namespaces. Pick `plg_<short>` when `plugin_<id>` overflows
-the 15-char budget (e.g. `plg_grove_led` instead of `plugin_grove_led`).
+| Field | Type | Meaning |
+|-------|------|---------|
+| `wifi`, `ble`, `http`, `display_lowlevel`, `usb_cdc`, `vfat`, `pixel_strip`, `ui_exclusive` | bool | Gate the matching host API family. |
+| `background`, `autoload`, `prevent_sleep` | bool | Behavioral flags. |
+| `grove`, `sao` | bool | Hardware port shortcuts. |
+| `rmem` | string[] | Named secure-memory slots (1-15 chars). Requires `nvs_namespace`. |
+| `ecc` | string[] | Named ECC key slots (1-15 chars). |
+| `ble_service_uuids` | string[] | 128-bit lowercase UUIDs for GATT services. |
+| `gpio_pins`, `pwm_pins`, `adc_pins`, `i2c_bus` | int[] | Hardware pins / buses the plugin may use. |
+| `nvs_namespace` | string | Must start with `plg_` or `plugin_`; `[a-z0-9_]` only; max 15 chars. |
 
 ## prerequisites
 

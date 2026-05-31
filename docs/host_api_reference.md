@@ -1,18 +1,18 @@
 # Host API Reference
 
-The canonical source of truth for the host API is [`sdk/host_api.h`](../sdk/host_api.h). This file walks the same API in a more readable form.
+The canonical source of truth for the host API is [`sdk/host_api.h`](../sdk/host_api.h),
+with a browsable [Doxygen HTML rendering](https://krim404.github.io/cdc-badge-os/docs/host__api_8h.html).
+This page is a thin index; the header has every function with its `\brief`,
+parameters and return semantics.
 
 ## API Level
 
-```c
-#define HOST_API_LEVEL_MAJOR  0
-#define HOST_API_LEVEL_MINOR  6
-```
-
-A plugin declares the minimum it needs in `meta.json`:
+The current level constants and packed value live in
+[`sdk/host_api.h`](../sdk/host_api.h) (`HOST_API_LEVEL_MAJOR/MINOR/STR`). A
+plugin declares the minimum it needs in `meta.json`:
 
 ```json
-"host_api_level_min": "0.5"
+"host_api_level_min": "0.6"
 ```
 
 The host loads the plugin only if `plugin_major == host_major && plugin_minor <= host_minor`. Pre-1.0, treat any minor bump as potentially breaking - rebuild your plugin against the new SDK.
@@ -26,7 +26,7 @@ The host loads the plugin only if `plugin_major == host_major && plugin_minor <=
 - **SecureElement** - R-Memory, ECC keys, ECDSA / EdDSA signing
 - **HTTP** - streamed open/perform/read/close
 - **WiFi** - request/release, info, scan
-- **BLE** - GATT server registration, GATT client read/write/notify
+- **BLE** (⚠️ WIP, untested on hardware) - GATT server registration, GATT client read/write/notify
 - **NVS** - typed key/value, per-plugin namespace
 - **UI** - push pre-built views (toast, list, confirm, T9 input, ...)
 - **Low-level GFX** - opt-in via capability
@@ -48,6 +48,7 @@ The host loads the plugin only if `plugin_major == host_major && plugin_minor <=
 #define HOST_ERR_NO_MEMORY      -6
 #define HOST_ERR_BUSY           -7
 #define HOST_ERR_NOT_SUPPORTED  -8
+#define HOST_ERR_RMEM_FULL      -9
 ```
 
 ## Capability vs prerequisite
