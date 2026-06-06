@@ -1,0 +1,13 @@
+[package]
+name = "sci_calc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+cdc-badge-plugin = { path = "../../sdk/cdc-badge-plugin", features = ["panic_handler"] }
+libm = "0.2"

@@ -8,6 +8,13 @@
 
 set -euo pipefail
 
+# rustup is Homebrew-installed without ~/.cargo/bin shims, so cargo is absent
+# from PATH in non-interactive shells. Resolve it through rustup, which honours
+# the rust-toolchain.toml override.
+if ! command -v cargo >/dev/null 2>&1; then
+  PATH="$(dirname "$(rustup which cargo)"):${PATH}"
+fi
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET_DIR="${REPO_ROOT}/target/wasm32-unknown-unknown/release"
 DIST_DIR="${REPO_ROOT}/dist"
@@ -15,7 +22,13 @@ DIST_DIR="${REPO_ROOT}/dist"
 mkdir -p "${DIST_DIR}"
 
 cd "${REPO_ROOT}"
-cargo build --release --target wasm32-unknown-unknown
+# The matrix plugin is a std crate (it links vodozemac for E2EE), while every
+# other plugin is no_std. Building them in one cargo invocation unifies features
+# across the shared cdc-badge-plugin / serde_json deps and leaks std into the
+# no_std plugins (duplicate panic_impl). Build the no_std plugins together, then
+# matrix on its own.
+cargo build --release --target wasm32-unknown-unknown --workspace --exclude matrix
+cargo build --release --target wasm32-unknown-unknown -p matrix
 
 WASM_OPT="$(command -v wasm-opt || true)"
 

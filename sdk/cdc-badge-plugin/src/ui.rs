@@ -19,15 +19,12 @@ pub use ffi::{HOST_STR_TARGET_CP437, HOST_STR_TARGET_LATIN1};
 /// \brief Convert a UTF-8/HTML web string into single-byte display
 ///        characters in the codepage of the \p target font.
 ///
-/// Decodes HTML named/numeric entities and collapses UTF-8 multibyte
-/// sequences into the single-byte layout the chosen font expects.
-/// Unknown codepoints are dropped. The returned buffer has no trailing
-/// NUL; pass it (or its `.as_slice()`) to any push helper that accepts
-/// `impl AsRef<[u8]>`.
+/// No longer needed in the normal flow: every UI / canvas / display function
+/// takes UTF-8 and converts internally. Pass `&str` straight to them. Kept for
+/// advanced cases; do not feed its output back into those functions or the
+/// text is encoded twice.
 /// \param input  Source string from the web (RSS, JSON, HA API, ...).
-/// \param target One of `HOST_STR_TARGET_CP437` (default for the
-///               GFX builtin glcdfont) or `HOST_STR_TARGET_LATIN1`
-///               (FreeMonoBold*pt8b fonts).
+/// \param target One of `HOST_STR_TARGET_CP437` or `HOST_STR_TARGET_LATIN1`.
 pub fn to_display_with(input: &str, target: u32) -> Vec<u8> {
     let in_c = match CString::new(input.as_bytes()) {
         Ok(c) => c,
@@ -53,17 +50,16 @@ pub fn to_display_with(input: &str, target: u32) -> Vec<u8> {
 
 /// \brief Convenience wrapper: `to_display_with(input, HOST_STR_TARGET_CP437)`.
 ///
-/// Use this whenever you hand text to a plugin push helper - those views
-/// render with the GFX builtin glcdfont after the splash so CP437 is the
-/// right codepage. For the FreeMonoBold*pt8b fonts call
-/// `to_display_with(s, HOST_STR_TARGET_LATIN1)` instead.
+/// No longer needed: hand `&str` directly to the push helpers, which convert
+/// UTF-8 internally.
 pub fn to_display(input: &str) -> Vec<u8> {
     to_display_with(input, HOST_STR_TARGET_CP437)
 }
 
-/// \brief Inverse of `to_display`: convert CP437 display bytes back to a UTF-8
-/// String. Use before persisting or transmitting on-screen-edited text so it
-/// stays UTF-8.
+/// \brief Convert CP437 display bytes back to a UTF-8 String.
+///
+/// No longer needed: `consume_input_text` and `canvas::get_text` already
+/// return UTF-8.
 pub fn from_display(input: &[u8]) -> alloc::string::String {
     let in_c = match CString::new(input) {
         Ok(c) => c,
@@ -123,8 +119,8 @@ pub fn push_message<T: AsRef<[u8]>>(text: T, icon: u8, duration_ms: u32) {
 
 /// \brief Show a Y/N confirmation dialog.
 ///
-/// Fires `action_id` in `plugin_on_action` with `idx=1` on confirm,
-/// `idx=0` on cancel.
+/// Fires `action_id` in `plugin_on_action` with `user_data=1` on confirm (Y),
+/// `user_data=0` on cancel (N).
 /// \param text     Prompt text.
 /// \param icon     One of the `UI_ICON_*` constants.
 /// \param action_id Action id echoed back to the plugin on user response.
@@ -387,7 +383,11 @@ impl ContextMenuBuilder {
     }
 }
 
-/// \brief Pop views until the plugin's own root view is on top.
+/// \brief Pop back to the plugin's first view.
+///
+/// Pops every view the plugin pushed during or after `plugin_on_enter`, back
+/// to its first view (the stack depth recorded at entry). Views below the
+/// plugin are untouched. No-op if the plugin pushed nothing.
 pub fn pop_to_plugin() {
     unsafe {
         ffi::host_ui_pop_to_plugin();
@@ -461,7 +461,10 @@ impl SliderBuilder {
         self
     }
 
-    /// \brief Set the action fired when the user confirms the value.
+    /// \brief Set the action fired when the slider closes.
+    ///
+    /// Fires on confirm (`user_data = 1`; read the value via
+    /// [`consume_input_int`]) and on cancel (`user_data = 0`, nothing pending).
     /// \param action_id Action id echoed back to the plugin.
     pub fn on_save(mut self, action_id: u32) -> Self {
         self.action = action_id;
@@ -488,7 +491,8 @@ impl SliderBuilder {
 ///
 /// Fires `action_id` on Y with `idx = packed RGB (0xRRGGBB)` and
 /// `user_data = 1`. Read the value via [`consume_input_int`] which
-/// returns the same packed integer. On N the view pops silently.
+/// returns the same packed integer. On N (cancel) it fires with
+/// `user_data = 0` and nothing pending. The view pops itself first.
 pub fn push_color_picker(r: u8, g: u8, b: u8, action_id: u32) {
     unsafe {
         ffi::host_ui_push_color_picker(r, g, b, action_id);
@@ -496,7 +500,9 @@ pub fn push_color_picker(r: u8, g: u8, b: u8, action_id: u32) {
 }
 
 /// \brief Read the integer payload of the most recent slider / number
-///        entry view that produced a confirmation event.
+///        entry view that produced a confirmation event. A cancelled input
+///        has no payload and returns `None` (the confirm handler tells the two
+///        apart via `user_data`: 1 = confirm, 0 = cancel).
 /// \return The entered value, or `None` if there is no pending input.
 pub fn consume_input_int() -> Option<i32> {
     let mut out: i32 = 0;
@@ -534,8 +540,11 @@ fn push_text_input(
 
 /// \brief Push a T9 text input view.
 ///
-/// Fires `action_id` with `idx=1` on confirm, `idx=0` on cancel. Read the
-/// entered text with `consume_input_text`.
+/// Fires `action_id` on both outcomes; the view pops itself before it fires,
+/// so do not call [`pop`] in the handler. On confirm: `user_data = 1`, `idx` =
+/// entered text length, read the text with [`consume_input_text`]. On cancel
+/// (back): `user_data = 0`, `idx = 0` and no text is pending, so
+/// [`consume_input_text`] returns `None`.
 /// \param title     Input header text.
 /// \param initial   Optional pre-filled buffer; `None` starts empty.
 /// \param max_len   Maximum number of characters the user may enter.
@@ -546,6 +555,10 @@ pub fn push_t9_input(title: &str, initial: Option<&str>, max_len: u16, action_id
 
 /// \brief Push a password input view (masked T9).
 ///
+/// Same contract as [`push_t9_input`]: confirm fires `action_id` with
+/// `user_data = 1` and `idx` = the entered text length (read the text with
+/// [`consume_input_text`]); cancel fires with `user_data = 0` and nothing
+/// pending. The view pops itself first, so do not call [`pop`] in the handler.
 /// `initial` is rarely useful here; pass `None` unless you have a concrete
 /// edit-existing flow.
 /// \param title     Input header text.
@@ -557,11 +570,15 @@ pub fn push_password(title: &str, initial: Option<&str>, max_len: u16, action_id
 }
 
 /// \brief Read the text payload of the most recent T9 / password view that
-///        produced a confirmation event.
-/// \param max_len Buffer capacity; allocates `max_len + 1` bytes.
+///        produced a confirmation event. A cancelled input has no payload, so
+///        this returns `None` (a confirm handler distinguishes the two via the
+///        `user_data` argument: 1 = confirm, 0 = cancel).
+/// \param max_len Maximum number of characters to read. The buffer is sized
+///                for the UTF-8 worst case, so non-ASCII entries are never
+///                truncated mid-string.
 /// \return The entered text, or `None` if there is no pending input.
 pub fn consume_input_text(max_len: usize) -> Option<alloc::string::String> {
-    let cap = max_len.saturating_add(1);
+    let cap = max_len.saturating_mul(4).saturating_add(1);
     let mut buf = Vec::<u8>::with_capacity(cap);
     let rc = unsafe {
         buf.set_len(cap);
@@ -578,8 +595,9 @@ pub fn consume_input_text(max_len: usize) -> Option<alloc::string::String> {
 
 /// \brief Push a date picker view.
 ///
-/// Fires `action_id` on confirm; read the packed value via
-/// [`consume_input_int`] (the host encodes the picked date).
+/// Fires `action_id` on confirm (`user_data = 1`; read the packed value via
+/// [`consume_input_int`], the host encodes the picked date) and on cancel
+/// (`user_data = 0`, nothing pending). The view pops itself first.
 /// \param title     View header text.
 /// \param day       Initial day (1-31).
 /// \param month     Initial month (1-12).
@@ -593,6 +611,9 @@ pub fn push_date(title: &str, day: u8, month: u8, year: u16, action_id: u32) {
 }
 
 /// \brief Push a time-of-day picker view.
+///
+/// Fires `action_id` on confirm (`user_data = 1`; read via [`consume_input_int`])
+/// and on cancel (`user_data = 0`, nothing pending). The view pops itself first.
 /// \param title     View header text.
 /// \param hour      Initial hour (0-23).
 /// \param minute    Initial minute (0-59).
@@ -605,6 +626,9 @@ pub fn push_time(title: &str, hour: u8, minute: u8, action_id: u32) {
 }
 
 /// \brief Push a numeric PIN entry view.
+///
+/// Fires `action_id` on confirm (`user_data = 1`, `idx` = PIN length) and on
+/// cancel (`user_data = 0`). The view pops itself before the action fires.
 /// \param title        View header text.
 /// \param max_len      Number of PIN digits.
 /// \param max_attempts Allowed attempts; `0` for unlimited.

@@ -12,7 +12,7 @@ The current level constants and packed value live in
 plugin declares the minimum it needs in `meta.json`:
 
 ```json
-"host_api_level_min": "0.6"
+"host_api_level_min": "0.8"
 ```
 
 The host loads the plugin only if `plugin_major == host_major && plugin_minor <= host_minor`. Pre-1.0, treat any minor bump as potentially breaking - rebuild your plugin against the new SDK.
@@ -25,6 +25,7 @@ The host loads the plugin only if `plugin_major == host_major && plugin_minor <=
 - **Crypto** - SHA256, HMAC-SHA256, AES-GCM, Base32/64/Hex, Random
 - **SecureElement** - R-Memory, ECC keys, ECDSA / EdDSA signing
 - **HTTP** - streamed open/perform/read/close
+- **Socket** - generic outbound TCP client connect/read/write/close
 - **WiFi** - request/release, info, scan
 - **BLE** (⚠️ WIP, untested on hardware) - GATT server registration, GATT client read/write/notify
 - **NVS** - typed key/value, per-plugin namespace

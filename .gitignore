@@ -24,3 +24,10 @@ venv/
 # CI artifacts
 _site/
 catalog.json
+
+# Working notes (problems / doc discrepancies), not for the repo history
+error.md
+
+# Local agent notes
+CLAUDE.md
+plan.md

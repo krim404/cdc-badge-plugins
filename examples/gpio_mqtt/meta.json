@@ -1,0 +1,45 @@
+{
+  "id": "gpio_mqtt",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "info",
+  "host_api_level_min": "0.7",
+  "linear_memory_kb": 96,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": { "en": "GPIO MQTT" },
+      "description": { "en": "Publish GPIO state changes to an MQTT broker." }
+    },
+    "strings": {
+      "not_configured": { "en": "not configured" },
+      "wifi": { "en": "WiFi" },
+      "last_publish": { "en": "Last publish" },
+      "never": { "en": "never" },
+      "ok": { "en": "ok" },
+      "failed": { "en": "failed" },
+      "settings": { "en": "Settings" },
+      "mqtt_url": { "en": "MQTT server URL" },
+      "username": { "en": "Username" },
+      "password": { "en": "Password" },
+      "topic": { "en": "Topic" },
+      "hint_main": { "en": "[3] Settings [N] Back" }
+    }
+  },
+  "capabilities": {
+    "wifi": true,
+    "socket": true,
+    "grove": true,
+    "sao": true,
+    "gpio_pins": [4, 5, 6, 7, 9, 14, 38, 40, 43, 44],
+    "ui_exclusive": true,
+    "prevent_sleep": true,
+    "nvs_namespace": "plg_gpio_mqtt"
+  },
+  "prerequisites": {
+    "wifi_connected": {
+      "timeout_ms": 15000,
+      "on_fail": "abort"
+    }
+  }
+}

@@ -165,6 +165,7 @@ extern "C" {
     pub fn host_view_canvas_set_focus(widget_id: u32) -> c_int;
     pub fn host_view_canvas_get_focus(out: *mut u32) -> c_int;
     pub fn host_view_canvas_set_key_repeat(initial_ms: u16, repeat_ms: u16) -> c_int;
+    pub fn host_view_canvas_set_long_press_action(action_id: u32) -> c_int;
 
     // I18n
     pub fn host_i18n_tr_key(key: *const c_char, out: *mut c_char, out_cap: u32) -> c_int;

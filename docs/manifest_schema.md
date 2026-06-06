@@ -45,6 +45,7 @@ for what each one allows, how it is enforced, and the behavioral flags
   "wifi": true,
   "ble": false,
   "http": true,
+  "socket": false,
   "ui_exclusive": true,
   "display_lowlevel": false,
   "usb_cdc": false,
@@ -68,7 +69,7 @@ for what each one allows, how it is enforced, and the behavioral flags
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `wifi`, `ble`, `http`, `display_lowlevel`, `usb_cdc`, `vfat`, `pixel_strip`, `ui_exclusive` | bool | Gate the matching host API family. |
+| `wifi`, `ble`, `http`, `socket`, `display_lowlevel`, `usb_cdc`, `vfat`, `pixel_strip`, `ui_exclusive` | bool | Gate the matching host API family. |
 | `background`, `autoload`, `prevent_sleep` | bool | Behavioral flags. |
 | `grove`, `sao` | bool | Hardware port shortcuts. |
 | `rmem` | string[] | Named secure-memory slots (1-15 chars). Requires `nvs_namespace`. |

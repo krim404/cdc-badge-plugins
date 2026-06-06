@@ -41,6 +41,7 @@ when porting your own plugin.
 | `hello_world` | (none) | Lifecycle skeleton, toast output, i18n string lookup. The smallest possible plugin. |
 | `battery_widget` | (none) | Polling the read-only Power API and rendering a live widget. |
 | `grove_blink` | `grove` | GPIO output on the Grove port and a simple ListView toggle driven by key events. |
+| `gpio_mqtt` | `wifi`, `socket`, `grove`, `sao`, `nvs_namespace`, `ui_exclusive` | GPIO input polling, MQTT 3.1.1 publish over generic TCP sockets, Canvas status view, and NVS-persisted settings. |
 | `news_feed` | `wifi`, `http`, `nvs_namespace`, `ui_exclusive` | Wi-Fi prerequisite handling, HTTP fetch, Atom/RSS parsing, NVS-persisted feed URL with T9 editing, reload on key press. |
 
 ### `plugins/` - shipped in the default catalog

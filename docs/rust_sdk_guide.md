@@ -40,7 +40,7 @@ pub extern "C" fn plugin_on_enter() -> i32 {
 
 Highlights below. The crate also has `canvas`, `cmd`, `crypto`, `display`,
 `fs`, `gpio`, `http`, `i2c`, `keypad`, `lockscreen`, `pixel_strip`, `random`,
-`rmem`, `sao`, `secure_element`, `sysinfo`, `usb`, and `wifi`. See the
+`rmem`, `sao`, `secure_element`, `socket`, `sysinfo`, `usb`, and `wifi`. See the
 generated crate docs (`cargo doc -p cdc-badge-plugin --open`) for the full API.
 
 | Module | Use |

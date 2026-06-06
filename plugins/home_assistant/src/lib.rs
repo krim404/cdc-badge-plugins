@@ -214,7 +214,7 @@ impl Entity {
         }
     }
 
-    fn label(&self) -> Vec<u8> {
+    fn label(&self) -> String {
         let s = match self.domain {
             Domain::Sensor | Domain::BinarySensor => {
                 if self.unit.is_empty() {
@@ -236,7 +236,7 @@ impl Entity {
                 format!("{} {}", glyph, self.name)
             }
         };
-        ui::to_display(&s)
+        s
     }
 }
 
@@ -1622,7 +1622,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
         }
 
         ACT_REMOVE_FAV_CONFIRM => {
-            if idx == 1 {
+            if user_data == 1 {
                 if let Some(i) = PENDING_REMOVE.borrow_mut().take() {
                     let mut favs = FAVS.borrow_mut();
                     if i < favs.len() {
@@ -1638,17 +1638,8 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             home_render();
         }
         ACT_CLIMATE_KEY => {
-            let key_code = idx as u8;
-            let ch = if key_code == 10 {
-                'Y'
-            } else if key_code == 11 {
-                'N'
-            } else if (b'0'..=b'9').contains(&key_code) {
-                key_code as char
-            } else {
-                key_code as char
-            };
-            climate_handle_key(ch);
+            // Canvas key callback: user_data carries the ASCII key code.
+            climate_handle_key(user_data as u8 as char);
         }
         ACT_CLIMATE_WIDGET => {
             let event = user_data;
@@ -1664,7 +1655,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
         }
 
         ACT_RESET_CONFIRM => {
-            if idx == 1 {
+            if user_data == 1 {
                 reset_all();
                 ui::push_toast(i18n::tr_key("reset_done"), ui::UI_ICON_SUCCESS, 1000);
             }

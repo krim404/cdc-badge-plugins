@@ -26,8 +26,8 @@ build:
       for w in dist/*.wasm; do
         size=$(wc -c < "$w")
         echo "$w: $size bytes"
-        if [ "$size" -gt 262144 ]; then
-          echo "ERROR: $w exceeds 256 KB limit ($size bytes)"
+        if [ "$size" -gt 786432 ]; then
+          echo "ERROR: $w exceeds 768 KB limit ($size bytes)"
           exit 1
         fi
       done

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "author": "krim",
   "icon": "info",
-  "host_api_level_min": "0.6",
+  "host_api_level_min": "0.7",
   "linear_memory_kb": 128,
   "i18n": {
     "default_language": "en",
@@ -24,6 +24,7 @@
     "wifi": true,
     "ble": true,
     "http": true,
+    "socket": true,
     "display_lowlevel": true,
     "sao": true,
     "pixel_strip": true,

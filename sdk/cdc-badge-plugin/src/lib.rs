@@ -16,7 +16,7 @@ use core::ffi::c_int;
 /// \brief Major part of the host API level this SDK targets.
 pub const HOST_API_LEVEL_MAJOR: u16 = 0;
 /// \brief Minor part of the host API level this SDK targets.
-pub const HOST_API_LEVEL_MINOR: u16 = 6;
+pub const HOST_API_LEVEL_MINOR: u16 = 8;
 
 /// \brief Unified error type for every fallible host API call.
 ///
@@ -120,6 +120,7 @@ pub mod random;
 pub mod rmem;
 pub mod sao;
 pub mod secure_element;
+pub mod socket;
 pub mod sysinfo;
 pub mod time;
 pub mod ui;

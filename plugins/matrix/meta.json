@@ -1,0 +1,82 @@
+{
+  "id": "matrix",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "info",
+  "host_api_level_min": "0.7",
+  "linear_memory_kb": 1024,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": {
+        "en": "Matrix"
+      },
+      "description": {
+        "en": "Matrix chat client: send and receive text messages."
+      }
+    },
+    "strings": {
+      "no_rooms": { "en": "No rooms - press [3]" },
+      "not_configured": { "en": "Not configured - press [3]" },
+      "hint_rooms": { "en": "[Y] Open [1] Sync [3] Menu [N] Back" },
+      "menu_join": { "en": "Join room" },
+      "menu_create": { "en": "New room" },
+      "menu_accept": { "en": "Accept invite" },
+      "menu_reject": { "en": "Reject invite" },
+      "menu_delete": { "en": "Leave room" },
+      "menu_invite": { "en": "Invite" },
+      "menu_system": { "en": "System" },
+      "sys_title": { "en": "System" },
+      "sys_user": { "en": "User" },
+      "sys_pass": { "en": "Password" },
+      "sys_server": { "en": "Server URL" },
+      "sys_key": { "en": "E2EE key" },
+      "sys_login": { "en": "Login & save" },
+      "sys_reset": { "en": "Reset module" },
+      "hint_system": { "en": "[Y] Edit [N] Back" },
+      "new_room_prompt": { "en": "Room/alias or @user:server" },
+      "create_prompt": { "en": "New room name" },
+      "invite_user_prompt": { "en": "Invite @user:server" },
+      "delete_confirm": { "en": "Leave this room?" },
+      "invite_confirm": { "en": "Accept invitation?" },
+      "reset_confirm": { "en": "Erase all Matrix data?" },
+      "reset_done": { "en": "Module reset" },
+      "login_failed": { "en": "Login failed" },
+      "logged_in": { "en": "Logged in" },
+      "connecting": { "en": "Connecting..." },
+      "sending": { "en": "Sending..." },
+      "joined": { "en": "Joined" },
+      "created": { "en": "Room created" },
+      "invited": { "en": "Invited" },
+      "invite_failed": { "en": "Invite failed" },
+      "join_failed": { "en": "Join failed" },
+      "send_failed": { "en": "Send failed" },
+      "distributing": { "en": "Distributing keys" },
+      "distributed": { "en": "Keys distributed" },
+      "reply_prompt": { "en": "Message" },
+      "hint_chat": { "en": "[Y] Reply [3] Menu [N] Back" },
+      "decrypt_failed": { "en": "(encrypted)" },
+      "no_messages": { "en": "(no messages)" },
+      "e2ee_no_key": { "en": "No E2EE key - cannot reply here" }
+    }
+  },
+  "capabilities": {
+    "wifi": true,
+    "http": true,
+    "ui_exclusive": true,
+    "prevent_sleep": true,
+    "nvs_namespace": "plg_matrix",
+    "rmem": [
+      "mtx_token",
+      "mtx_pass",
+      "mtx_reckey",
+      "mtx_pickle"
+    ]
+  },
+  "prerequisites": {
+    "wifi_connected": {
+      "timeout_ms": 15000,
+      "on_fail": "abort"
+    }
+  }
+}

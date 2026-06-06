@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "translations": {
+    "de": {
+      "meta.name": "Wissenschaftlicher Rechner",
+      "meta.description": "Algebraischer Tape-Rechner mit Langdruck-Schnelltasten und Funktionsmenü.",
+      "deg": "DEG",
+      "rad": "RAD",
+      "menu": "Funktionen",
+      "cat_arith": "Grundrechenarten",
+      "cat_trig": "Trigonometrie",
+      "cat_logexp": "Log & Exp",
+      "cat_const": "Konstanten",
+      "cat_mem": "Speicher",
+      "angle": "Winkel",
+      "history": "Verlauf",
+      "export": "Export",
+      "quit": "Beenden",
+      "negate": "Vorzeichen +/-",
+      "dot": "Komma .",
+      "backspace": "Löschen",
+      "clear_entry": "Eingabe löschen",
+      "clear_all": "Alles löschen",
+      "err_divzero": "Division durch Null",
+      "err_domain": "Definitionsbereich",
+      "err_overflow": "Überlauf",
+      "saved": "Gespeichert:",
+      "empty": "Kein Verlauf",
+      "hint": "langY:Menü langN:Clr N+Y:Ende"
+    }
+  }
+}

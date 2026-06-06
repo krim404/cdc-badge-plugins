@@ -23,6 +23,7 @@ Examples:
 | `host_ecc_*(name, ...)` (`generate`/`pubkey`/`delete`/`ecdsa_sign`/`eddsa_sign`/...) | `ecc` must contain `name` |
 | `host_wifi_request()` | `wifi: true` |
 | `host_http_open(...)` | `http: true` |
+| `host_socket_*` | `socket: true` |
 | `host_display_*` low-level GFX | `display_lowlevel: true` |
 | `host_ble_*` (GATT server + central) ⚠️ **WIP, untested** | `ble: true` |
 | `host_usb_cdc_*` | `usb_cdc: true` |

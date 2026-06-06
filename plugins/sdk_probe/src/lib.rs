@@ -49,8 +49,8 @@ use alloc::string::String;
 // wires up the boilerplate the firmware expects.
 use cdc_badge_plugin::{
     ble, canvas, cmd, crypto, display, event, fs, gpio, http, i18n, i2c, keypad, lockscreen, log,
-    nvs, pixel_strip, plugin_main, power, random, rmem, sao, secure_element, sysinfo, time, ui, usb,
-    wifi,
+    nvs, pixel_strip, plugin_main, power, random, rmem, sao, secure_element, socket, sysinfo, time,
+    ui, usb, wifi,
 };
 
 plugin_main!();
@@ -61,12 +61,16 @@ const TAG: &str = "probe";
 /// ECC key name declared in meta.json `capabilities.ecc`.
 const ECC_KEY: &str = "probe";
 
+/// Action id echoed back when the user answers the lockscreen alert.
+const ALERT_ACTION_ID: u32 = 4244;
+
 // A tiny state machine for the startup sequence. `plugin_on_tick` runs many
 // times per second; these three values track where we are in the
 // "show toast -> wait 1s -> run once" flow.
 const PHASE_INIT: u8 = 0;
 const PHASE_WAIT: u8 = 1;
 const PHASE_DONE: u8 = 2;
+const PHASE_ALERT: u8 = 3;
 
 // State that must survive between tick calls lives in `static mut`. Reading or
 // writing it needs an `unsafe` block because the compiler cannot prove only
@@ -114,6 +118,20 @@ pub extern "C" fn plugin_on_exit() -> i32 {
     0
 }
 
+/// Receives the answer to the deferred lockscreen alert: `user_data` is 1 for Y
+/// (confirm) or 0 for N (cancel).
+#[no_mangle]
+pub extern "C" fn plugin_on_action(action_id: u32, _idx: u32, user_data: u32) -> i32 {
+    if action_id == ALERT_ACTION_ID {
+        line(if user_data == 1 {
+            "lockscreen::alert answered YES"
+        } else {
+            "lockscreen::alert answered NO"
+        });
+    }
+    0
+}
+
 /// Runs once per frame while the plugin is open; `uptime_ms` is the current
 /// time in milliseconds. This uses the PHASE_* state machine to show a
 /// "running" toast on the first tick, then ~1 second later run the probe once
@@ -134,11 +152,22 @@ pub extern "C" fn plugin_on_tick(uptime_ms: u64) -> i32 {
         line("probe armed; starting in 1s");
     } else if phase == PHASE_WAIT && uptime_ms.saturating_sub(unsafe { START_MS }) >= 1000 {
         // 1000 ms have passed. `saturating_sub` avoids underflow if the clock
-        // ever goes backwards. Run everything once, then stop (PHASE_DONE).
-        unsafe { PHASE = PHASE_DONE };
+        // ever goes backwards. Run everything once, then defer the alert demo.
+        unsafe {
+            PHASE = PHASE_DONE;
+            START_MS = uptime_ms;
+        }
         run_probe();
         ui::push_toast(i18n::tr_key("done"), ui::UI_ICON_SUCCESS, 3000);
         line("probe complete");
+    } else if phase == PHASE_DONE && uptime_ms.saturating_sub(unsafe { START_MS }) >= 3500 {
+        // Once the "done" toast has cleared, raise the persistent Y/N alert a
+        // background plugin would use to reach the user on the lock screen. The
+        // umlauts double as a UTF-8 round-trip check; the answer arrives in
+        // plugin_on_action.
+        unsafe { PHASE = PHASE_ALERT };
+        let rc = lockscreen::alert("SDK probe alert: OK? äöü", ui::UI_ICON_ALERT, ALERT_ACTION_ID);
+        line(&format!("lockscreen::alert raised = {:?}", rc));
     }
     0
 }
@@ -162,6 +191,7 @@ fn run_probe() {
     probe_i2c();
     probe_sao();
     probe_http();   // before WiFi: WiFi probing may drop the connection
+    probe_socket();
     probe_wifi();
     probe_ble();
     probe_display();
@@ -436,6 +466,23 @@ fn probe_gpio() {
     line(&format!("gpio::adc_read(4) = {:?}", gpio::adc_read(4)));
     gpio::release(pin);   // hand the pin back so other features can use it
     line("gpio::release done");
+
+    // Negative test: try to grab a hardware-reserved pin. GPIO 33 is an octal
+    // PSRAM data line (SPIIO4); driving it corrupts the PSRAM bus and crashes
+    // the device. The host must reject every operation on a blocked pin even
+    // when a plugin asks for it directly. An Ok(()) here would be a security
+    // bug; the manifest also cannot declare a blocked pin (load is rejected).
+    const BLOCKED_PIN: u8 = 33;
+    line(&format!(
+        "gpio::set_direction(blocked {}) = {:?} (expect Err)",
+        BLOCKED_PIN,
+        gpio::set_direction(BLOCKED_PIN, gpio::Direction::Input)
+    ));
+    line(&format!(
+        "gpio::read(blocked {}) = {:?} (expect Err)",
+        BLOCKED_PIN,
+        gpio::read(BLOCKED_PIN)
+    ));
 }
 
 // i2c: talk to add-on chips over the two-wire bus. `scan` finds which 7-bit
@@ -660,6 +707,10 @@ fn probe_lockscreen() {
     line(&format!("lockscreen::register = {:?}", lockscreen::register("running", 4243)));
     lockscreen::unregister();
     line("lockscreen::unregister done");
+    // lockscreen::alert (persistent Y/N over the lock screen) is exercised
+    // after the probe finishes, in plugin_on_tick -> PHASE_ALERT, so it does not
+    // get clobbered by the other modal pushes below.
+    line("lockscreen::alert deferred to end of probe");
 }
 
 // i18n: look up translated text. `tr_key` reads your plugin's strings,
@@ -711,6 +762,76 @@ fn probe_http() {
     }
 }
 
+// socket: the low-level transport under http. Open a connected TCP stream or
+// UDP socket to one remote endpoint, then write/read raw bytes; build your own
+// protocol (MQTT, DNS, ...) on top. Needs WiFi and the "socket" capability.
+// Both probes are real round-trips: TCP speaks a bare HTTP request, UDP sends a
+// DNS query to a public resolver and checks the reply echoes the same id.
+fn probe_socket() {
+    line("-- socket (TCP + UDP client, only when WiFi is connected) --");
+    if !wifi::is_connected() {
+        line("socket: WiFi not connected, skipping");
+        return;
+    }
+
+    // TCP: connect -> write a minimal HTTP/1.0 request -> read the status line.
+    match socket::TcpStream::connect("example.com", 80, 5000) {
+        Ok(stream) => {
+            let request = b"GET / HTTP/1.0\r\nHost: example.com\r\n\r\n";
+            match stream.write(request, 5000) {
+                Ok(n) => line(&format!("socket::tcp write = {} bytes", n)),
+                Err(e) => line(&format!("socket::tcp write -> {:?}", e)),
+            }
+            let mut buf = [0u8; 64];
+            match stream.read(&mut buf, 5000) {
+                Ok(n) => line(&format!(
+                    "socket::tcp read = {} bytes, HTTP reply = {}",
+                    n,
+                    buf.starts_with(b"HTTP")
+                )),
+                Err(e) => line(&format!("socket::tcp read -> {:?}", e)),
+            }
+            // stream closes itself when `stream` goes out of scope.
+        }
+        Err(e) => line(&format!("socket::tcp connect -> {:?}", e)),
+    }
+
+    // UDP: a connected socket fixes the peer, so write/read need no address.
+    // Query the A record for example.com from a public DNS resolver.
+    match socket::UdpSocket::connect("8.8.8.8", 53, 5000) {
+        Ok(sock) => {
+            let query: [u8; 29] = [
+                0x12, 0x34, // transaction id
+                0x01, 0x00, // flags: standard query, recursion desired
+                0x00, 0x01, // QDCOUNT = 1
+                0x00, 0x00, // ANCOUNT
+                0x00, 0x00, // NSCOUNT
+                0x00, 0x00, // ARCOUNT
+                0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e', // "example"
+                0x03, b'c', b'o', b'm', // "com"
+                0x00, // root label
+                0x00, 0x01, // QTYPE = A
+                0x00, 0x01, // QCLASS = IN
+            ];
+            match sock.write(&query, 5000) {
+                Ok(n) => line(&format!("socket::udp write = {} bytes", n)),
+                Err(e) => line(&format!("socket::udp write -> {:?}", e)),
+            }
+            let mut buf = [0u8; 64];
+            match sock.read(&mut buf, 5000) {
+                Ok(n) => line(&format!(
+                    "socket::udp read = {} bytes, id echoed = {}",
+                    n,
+                    n >= 2 && buf[0] == 0x12 && buf[1] == 0x34
+                )),
+                Err(e) => line(&format!("socket::udp read -> {:?}", e)),
+            }
+            // sock closes itself when `sock` goes out of scope.
+        }
+        Err(e) => line(&format!("socket::udp connect -> {:?}", e)),
+    }
+}
+
 // ui: the easy, high-level way to show screens and ask the user for input.
 // `push_*` puts a view on a stack; `pop` removes the top one. Input views
 // (confirm, list, slider, text, ...) fire an action id into plugin_on_action,
@@ -719,14 +840,8 @@ fn probe_http() {
 fn probe_ui() {
     line("-- ui (push every view type, then pop) --");
 
-    // Text coming from the web (HTML entities, UTF-8) must be converted to the
-    // badge font's single-byte codepage before it displays correctly.
-    // String conversion helpers.
-    line(&format!("ui::to_display = {} bytes", ui::to_display("<b>H&auml;</b>").len()));
-    line(&format!(
-        "ui::to_display_with(LATIN1) = {} bytes",
-        ui::to_display_with("Test", ui::HOST_STR_TARGET_LATIN1).len()
-    ));
+    // The host API speaks UTF-8: text (HTML entities, umlauts and all) is passed
+    // straight to the UI functions, which convert it for the display.
 
     // Toasts and messages disappear on their own; info and confirm stay until
     // dismissed. The last argument of push_confirm is the action id fired with

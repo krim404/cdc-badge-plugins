@@ -2,8 +2,14 @@
 //! \brief EventBus subscription and publishing.
 //!
 //! Plugins subscribe to one or more event types from the bitmask constants
-//! below. When the event fires, the host invokes the plugin's
-//! `plugin_on_action(action_id, ...)` callback.
+//! below. When a subscribed event fires, the host invokes the plugin's
+//! `plugin_on_action(action_id, idx, user_data)` callback, where `idx` is the
+//! event-type ordinal (the bit position of the matching constant: `KEY_PRESSED`
+//! -> 0, `KEY_RELEASED` -> 1, ...) and `user_data` is the event payload. Note
+//! the asymmetry: you subscribe with the mask bit (`1 << ordinal`) but receive
+//! the bare ordinal in `idx`. For key events (`KEY_PRESSED` / `KEY_RELEASED` /
+//! `KEY_LONG_PRESS`) the payload is the ASCII key code: `b'0'..=b'9'`,
+//! `b'Y'` (89), `b'N'` (78).
 
 use crate::{ffi, Error, Result};
 

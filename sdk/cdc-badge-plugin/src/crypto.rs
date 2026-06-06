@@ -142,7 +142,7 @@ fn decode_with(
 
 /// \brief Base32-encode `data` (RFC 4648 alphabet, no padding).
 pub fn base32_encode(data: &[u8]) -> Result<String> {
-    encode_with(data, (data.len() + 4) / 5 * 8 + 1, host_base32_encode)
+    encode_with(data, data.len().div_ceil(5) * 8 + 1, host_base32_encode)
 }
 
 /// \brief Base32-decode `text` into raw bytes.
@@ -152,7 +152,7 @@ pub fn base32_decode(text: &str) -> Result<Vec<u8>> {
 
 /// \brief Base64-encode `data` (standard alphabet with padding).
 pub fn base64_encode(data: &[u8]) -> Result<String> {
-    encode_with(data, (data.len() + 2) / 3 * 4 + 1, host_base64_encode)
+    encode_with(data, data.len().div_ceil(3) * 4 + 1, host_base64_encode)
 }
 
 /// \brief Base64-decode `text` into raw bytes.

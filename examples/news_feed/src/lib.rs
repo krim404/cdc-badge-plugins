@@ -77,8 +77,9 @@ const ACTION_EDIT_URL: u32 = 2;       // user pressed the menu key
 const ACTION_EDIT_URL_DONE: u32 = 3;  // T9 dialog confirmed/cancelled
 const ACTION_KEY_EVENT: u32 = 4;      // key press dispatched via event bus
 
-// ASCII for the digit keys; idx of plugin_on_action carries the key code
-// when fired via the KEY_PRESSED event subscription.
+// ASCII for the digit keys; user_data of plugin_on_action carries the key
+// code when fired via the KEY_PRESSED event subscription (idx is the event
+// ordinal, 0 for KEY_PRESSED).
 const KEY_RELOAD: u32 = b'1' as u32;
 
 // ---------------------------------------------------------------------
@@ -119,8 +120,8 @@ impl<T> core::ops::Deref for PluginCell<T> {
 // screen; `CURRENT_URL` is what we last fetched, used to prefill the
 // T9 editor when the user wants to change it.
 struct Entry {
-    title: Vec<u8>,
-    summary: Vec<u8>,
+    title: String,
+    summary: String,
 }
 
 static HEADLINES: PluginCell<Vec<Entry>> = PluginCell::new(Vec::new());
@@ -194,10 +195,8 @@ fn extract_first_entry(entry: &str) -> Option<Entry> {
         .map(strip_cdata)
         .map(|s| s.trim())
         .unwrap_or("");
-    let title_dec = ui::to_display(title_raw);
-    if title_dec.is_empty() { return None; }
-    let summary_plain = strip_html(summary_raw);
-    let summary_dec = ui::to_display(&summary_plain);
+    let title_dec = title_raw.to_string();
+    let summary_dec = strip_html(summary_raw);
     Some(Entry { title: title_dec, summary: summary_dec })
 }
 
@@ -401,10 +400,12 @@ pub extern "C" fn plugin_on_exit() -> i32 {
 }
 
 /// \brief Action dispatch for list selects, menu key and T9 confirm.
-/// \param action_id  Identifier set when pushing the originating view.
-/// \param idx        For list selects: item index. For T9: 1 = confirmed,
-///                   0 = cancelled.
-/// \param _user_data Unused.
+/// \param action_id Identifier set when pushing the originating view.
+/// \param idx       For list selects: item index. For a KEY_PRESSED event:
+///                  the event ordinal. For a T9 confirm: the entered text
+///                  length (0 on cancel).
+/// \param user_data For a KEY_PRESSED event: the ASCII key code. For a T9
+///                  result: 1 on confirm, 0 on cancel.
 /// \return `0` on success.
 //
 // `plugin_on_action` is the single entry point for *all* user input. We
@@ -416,18 +417,14 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
         ACTION_VIEW_TITLE => {
             let entries = HEADLINES.borrow();
             if let Some(e) = entries.get(idx as usize) {
-                let body: Vec<u8> = if e.summary.is_empty() {
+                let body: String = if e.summary.is_empty() {
                     e.title.clone()
                 } else {
-                    let mut b = Vec::with_capacity(e.title.len() + 2 + e.summary.len());
-                    b.extend_from_slice(&e.title);
-                    b.extend_from_slice(b"\n\n");
-                    b.extend_from_slice(&e.summary);
-                    b
+                    format!("{}\n\n{}", e.title, e.summary)
                 };
-                let title = ui::to_display(&i18n::tr_meta("name"));
+                let title = i18n::tr_meta("name");
                 drop(entries);
-                ui::push_info(&title, &body);
+                ui::push_info(title, &body);
             }
         }
         ACTION_EDIT_URL => {
@@ -452,9 +449,9 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             }
         }
         ACTION_EDIT_URL_DONE => {
-            // T9 dialog closed. Convention: `idx == 1` means the user
-            // confirmed, `idx == 0` means they cancelled.
-            if idx == 1 {
+            // The T9 closed. `user_data == 1` marks a confirm, `0` a cancel;
+            // only persist on confirm. Either way we re-fetch below.
+            if user_data == 1 {
                 // `consume_input_text` pulls the user-entered string
                 // out of the host. It returns `None` if there is no
                 // pending input (defensive - the host normally has it
@@ -469,9 +466,8 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
                     }
                 }
             }
-            // Pop the T9 dialog off the UI stack, then re-fetch with
-            // the new URL (or the old one if the user cancelled).
-            ui::pop();
+            // The T9 view already popped itself before this fired, so do
+            // not pop again here. Re-fetch with the (possibly new) URL.
             fetch_and_render();
         }
         // Unknown action IDs are ignored. This is friendlier than

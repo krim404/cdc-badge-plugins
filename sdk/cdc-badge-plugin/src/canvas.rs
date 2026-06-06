@@ -240,3 +240,12 @@ pub fn get_focus() -> u32 {
 pub fn set_key_repeat(initial_ms: u16, repeat_ms: u16) {
     unsafe { ffi::host_view_canvas_set_key_repeat(initial_ms, repeat_ms) };
 }
+
+/// \brief Set the action fired on a canvas long-press (0 to disable).
+///
+/// Registering a non-zero action opts the canvas into deferred short-press
+/// input: a tap fires the key callback on release while a hold fires this
+/// action (idx = 0, user_data = the ASCII key code) and suppresses the tap.
+pub fn set_long_press_action(action_id: u32) {
+    unsafe { ffi::host_view_canvas_set_long_press_action(action_id) };
+}

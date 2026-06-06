@@ -1,0 +1,46 @@
+{
+  "id": "sci_calc",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "info",
+  "host_api_level_min": "0.7",
+  "linear_memory_kb": 96,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": { "en": "Scientific Calculator" },
+      "description": { "en": "Algebraic tape calculator with long-press quick keys and a function menu." }
+    },
+    "strings": {
+      "deg": { "en": "DEG" },
+      "rad": { "en": "RAD" },
+      "menu": { "en": "Functions" },
+      "cat_arith": { "en": "Arithmetic" },
+      "cat_trig": { "en": "Trigonometry" },
+      "cat_logexp": { "en": "Log & Exp" },
+      "cat_const": { "en": "Constants" },
+      "cat_mem": { "en": "Memory" },
+      "angle": { "en": "Angle" },
+      "history": { "en": "History" },
+      "export": { "en": "Export" },
+      "quit": { "en": "Quit" },
+      "negate": { "en": "Negate +/-" },
+      "dot": { "en": "Decimal ." },
+      "backspace": { "en": "Backspace" },
+      "clear_entry": { "en": "Clear entry" },
+      "clear_all": { "en": "Clear all" },
+      "err_divzero": { "en": "Div by zero" },
+      "err_domain": { "en": "Domain error" },
+      "err_overflow": { "en": "Overflow" },
+      "saved": { "en": "Saved:" },
+      "empty": { "en": "No history" },
+      "hint": { "en": "lgY:Menu lgN:Clr N+Y:Exit" }
+    }
+  },
+  "capabilities": {
+    "ui_exclusive": false,
+    "vfat": true,
+    "nvs_namespace": "plg_sci_calc"
+  },
+  "prerequisites": {}
+}
