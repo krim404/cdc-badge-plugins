@@ -83,9 +83,9 @@ by a CI drift check. The Rust SDK auto-derives its constants from this file
 via `build.rs`, so there is one source of truth. The compatibility rule and
 return codes are documented in [docs/host_api_reference.md](docs/host_api_reference.md).
 
-Browsable HTML reference (rendered from `host_api.h` by Doxygen, refreshed on
-every firmware push):
-**https://krim404.github.io/cdc-badge-os/docs/host__api_8h.html**
+The curated reference is at **https://krim404.github.io/cdc-badge-os/dev/host-api/**,
+with the full Doxygen rendering of `host_api.h` (refreshed on every firmware push)
+at **https://krim404.github.io/cdc-badge-os/api/host__api_8h.html**.
 
 ## License
 

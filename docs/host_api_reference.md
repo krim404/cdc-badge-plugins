@@ -1,7 +1,8 @@
 # Host API Reference
 
 The canonical source of truth for the host API is [`sdk/host_api.h`](../sdk/host_api.h),
-with a browsable [Doxygen HTML rendering](https://krim404.github.io/cdc-badge-os/docs/host__api_8h.html).
+with the curated [host API reference](https://krim404.github.io/cdc-badge-os/dev/host-api/)
+and a browsable [Doxygen HTML rendering](https://krim404.github.io/cdc-badge-os/api/host__api_8h.html).
 This page is a thin index; the header has every function with its `\brief`,
 parameters and return semantics.
 
