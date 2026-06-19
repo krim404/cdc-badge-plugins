@@ -13,7 +13,7 @@ The current level constants and packed value live in
 plugin declares the minimum it needs in `meta.json`:
 
 ```json
-"host_api_level_min": "0.8"
+"host_api_level_min": "0.7"
 ```
 
 The host loads the plugin only if `plugin_major == host_major && plugin_minor <= host_minor`. Pre-1.0, treat any minor bump as potentially breaking - rebuild your plugin against the new SDK.

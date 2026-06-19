@@ -7,7 +7,8 @@
 //!
 //! Event flow:
 //! - Every key press not consumed by a focused widget fires the canvas
-//!   `key_action_id` with `idx = key_code`, `user_data = focused_widget`.
+//!   `key_action_id` with `idx = focused_widget`, `user_data = key_code` (the
+//!   ASCII code of the key). Read the pressed key from `user_data`.
 //! - Widget events (changed / committed / cancelled) fire
 //!   `widget_action_id` with `idx = widget_id`, `user_data` one of
 //!   [`WIDGET_CHANGED`], [`WIDGET_COMMITTED`], [`WIDGET_CANCELLED`].

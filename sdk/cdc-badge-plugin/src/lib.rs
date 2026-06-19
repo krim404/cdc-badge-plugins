@@ -16,7 +16,7 @@ use core::ffi::c_int;
 /// \brief Major part of the host API level this SDK targets.
 pub const HOST_API_LEVEL_MAJOR: u16 = 0;
 /// \brief Minor part of the host API level this SDK targets.
-pub const HOST_API_LEVEL_MINOR: u16 = 8;
+pub const HOST_API_LEVEL_MINOR: u16 = 7;
 
 /// \brief Unified error type for every fallible host API call.
 ///
