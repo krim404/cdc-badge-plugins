@@ -104,6 +104,7 @@ extern "C" {
     ) -> c_int;
     pub fn host_ui_set_view_footer(hint: *const c_char) -> c_int;
     pub fn host_ui_set_view_empty(text: *const c_char) -> c_int;
+    pub fn host_ui_set_view_lifecycle(hide_action_id: u32, show_action_id: u32) -> c_int;
     pub fn host_ui_update_list_item(index: u16, item: *const UiItem) -> c_int;
     pub fn host_ui_insert_list_item(index: u16, item: *const UiItem) -> c_int;
     pub fn host_ui_remove_list_item(index: u16) -> c_int;

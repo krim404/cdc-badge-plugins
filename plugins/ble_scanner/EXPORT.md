@@ -18,7 +18,7 @@ would be meaningless).
 Files live in the plugin's private vFAT folder:
 
 ```
-/plugins/data/ble_scanner/<DDMM-HHMM>.txt
+/vfat/data/ble_scanner/<DDMM-HHMM>.txt
 ```
 
 The name is the local end time, e.g. `0305-2213.txt` for 03 May, 22:13.

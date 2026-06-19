@@ -1,0 +1,33 @@
+{
+  "id": "mini_messenger",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "notes",
+  "host_api_level_min": "0.7",
+  "linear_memory_kb": 64,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": {
+        "en": "Mini Messenger",
+        "de": "Mini Messenger"
+      },
+      "description": {
+        "en": "Send and receive short text with nearby badges.",
+        "de": "Kurze Texte mit Badges in der Nähe senden und empfangen."
+      }
+    },
+    "strings": {
+      "menu_send":   { "en": "Send",            "de": "Senden" },
+      "menu_inbox":  { "en": "Inbox",           "de": "Posteingang" },
+      "compose":     { "en": "Message",         "de": "Nachricht" },
+      "received":    { "en": "New message",     "de": "Neue Nachricht" },
+      "empty_inbox": { "en": "No messages yet", "de": "Noch keine Nachrichten" }
+    }
+  },
+  "capabilities": {
+    "ble": true,
+    "message_types": ["text/plain"]
+  },
+  "prerequisites": {}
+}

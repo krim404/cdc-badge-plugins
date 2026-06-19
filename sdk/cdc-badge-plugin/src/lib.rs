@@ -113,6 +113,7 @@ pub mod i2c;
 pub mod keypad;
 pub mod lockscreen;
 pub mod log;
+pub mod msg;
 pub mod nvs;
 pub mod pixel_strip;
 pub mod power;

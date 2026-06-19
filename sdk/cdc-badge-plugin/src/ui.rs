@@ -271,6 +271,18 @@ pub fn set_list_empty<T: AsRef<[u8]>>(text: T) {
     }
 }
 
+/// \brief Register hide/show callbacks on the plugin's current top view.
+///
+/// `hide_action_id` fires (via `on_action`) when the view is covered by another
+/// view or modal; `show_action_id` fires when it becomes visible again. Pass 0
+/// for either id to leave that event unhooked. Lets a plugin pause/resume work
+/// (scans, timers, sensors) while its view is not visible.
+pub fn set_view_lifecycle(hide_action_id: u32, show_action_id: u32) {
+    unsafe {
+        ffi::host_ui_set_view_lifecycle(hide_action_id, show_action_id);
+    }
+}
+
 /// \brief Update a single row of the plugin's current top list in place.
 ///
 /// Redraws only the given row (partial refresh) instead of re-pushing the

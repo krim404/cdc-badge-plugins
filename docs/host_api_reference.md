@@ -36,6 +36,7 @@ The host loads the plugin only if `plugin_major == host_major && plugin_minor <=
 - **Keypad** - poll/consume, primary input comes through `plugin_on_button`
 - **System info** - feature flags, firmware version
 - **Command channel** - `host_cmd_consume` pulls a host-forwarded command string (paired with the optional `plugin_on_cmd` export)
+- **Message transfer** - `host_msg_register_handler` / `host_msg_consume` receive a typed payload (MIME + bytes) from a nearby badge after the local user consents; `host_msg_send_interactive` pushes one via the firmware-owned peer picker. The `flags` argument takes `HOST_MSG_FLAG_PERSIST` to remember the pairing for the session, so repeated sends to the same peer skip the confirmation prompt. Requires `ble` + `message_types`.
 
 ## Return codes
 

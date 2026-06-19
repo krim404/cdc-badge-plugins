@@ -54,7 +54,7 @@ like a classic pocket calculator: `2 + 3 x 4 =` yields `20`.
 
 ## Exporting the tape
 
-Files are written to the plugin's vFAT folder `/plugins/data/sci_calc/`.
+Files are written to the plugin's vFAT folder `/vfat/data/sci_calc/`.
 Retrieve them over the serial console:
 
 ```

@@ -59,6 +59,7 @@ for what each one allows, how it is enforced, and the behavioral flags
   "rmem": ["ha_token"],
   "ecc": ["signing_key"],
   "ble_service_uuids": [],
+  "message_types": ["text/plain"],
   "gpio_pins": [],
   "pwm_pins": [],
   "adc_pins": [],
@@ -75,6 +76,7 @@ for what each one allows, how it is enforced, and the behavioral flags
 | `rmem` | string[] | Named secure-memory slots (1-15 chars). Requires `nvs_namespace`. |
 | `ecc` | string[] | Named ECC key slots (1-15 chars). |
 | `ble_service_uuids` | string[] | 128-bit lowercase UUIDs for GATT services. |
+| `message_types` | string[] | MIME types handled for badge-to-badge message transfer. A non-empty list implies messaging; sending also requires `ble`. |
 | `gpio_pins`, `pwm_pins`, `adc_pins`, `i2c_bus` | int[] | Hardware pins / buses the plugin may use. |
 | `nvs_namespace` | string | Must start with `plg_` or `plugin_`; `[a-z0-9_]` only; max 15 chars. |
 

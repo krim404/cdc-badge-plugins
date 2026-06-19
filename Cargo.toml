@@ -8,6 +8,7 @@ members = [
     "examples/gpio_mqtt",
     "examples/news_feed",
     "examples/sci_calc",
+    "examples/mini_messenger",
     "plugins/home_assistant",
     "plugins/matrix",
     "plugins/grove_led",
