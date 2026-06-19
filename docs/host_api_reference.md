@@ -28,7 +28,7 @@ The host loads the plugin only if `plugin_major == host_major && plugin_minor <=
 - **HTTP** - streamed open/perform/read/close
 - **Socket** - generic outbound TCP client connect/read/write/close
 - **WiFi** - request/release, info, scan
-- **BLE** (⚠️ WIP, untested on hardware) - GATT server registration, GATT client read/write/notify
+- **BLE** - GATT server registration, GATT client read/write/notify
 - **NVS** - typed key/value, per-plugin namespace
 - **UI** - push pre-built views (toast, list, confirm, T9 input, ...)
 - **Low-level GFX** - opt-in via capability

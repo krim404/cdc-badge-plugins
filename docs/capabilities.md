@@ -25,7 +25,7 @@ Examples:
 | `host_http_open(...)` | `http: true` |
 | `host_socket_*` | `socket: true` |
 | `host_display_*` low-level GFX | `display_lowlevel: true` |
-| `host_ble_*` (GATT server + central) ⚠️ **WIP, untested** | `ble: true` |
+| `host_ble_*` (GATT server + central) | `ble: true` |
 | `host_msg_*` (badge-to-badge message transfer) | `ble: true` **and** a non-empty `message_types` |
 | `host_usb_cdc_*` | `usb_cdc: true` |
 | vFAT file storage (`host_fs_*`) | `vfat: true` |

@@ -8,8 +8,6 @@ Plugins run inside a sandboxed WAMR runtime on the badge and interact with the f
 
 Pre-alpha. Host API Level `0.6`. Breaking changes between minor versions until `1.0`.
 
-> ⚠️ The BLE host API (`ble` capability: GATT peripheral and central) is **work in progress and untested on hardware**. Treat all BLE functions as experimental.
-
 ## Repository Layout
 
 ```
@@ -53,7 +51,7 @@ examples but still framed as reference implementations.
 |--------|--------------|--------------|
 | `grove_led` | `background`, `pixel_strip`, `nvs_namespace` | Controls a WS2813 strip on the Grove port. Settings menu for count, brightness, color, and effects (rainbow, static, blink, breathing). Runs in the background. |
 | `home_assistant` | `wifi`, `http`, `rmem` (token), `nvs_namespace` | Toggles a curated list of Home Assistant lights and switches via the REST API. Settings menu, favorites flow, token stored in secure memory. Long-lived access tokens are unpleasant to type on T9, so paste them over serial with `PASTE <token>` while the API-key input field is open on the badge. |
-| `ble_scanner` | `ble`, `prevent_sleep`, `vfat` | ⚠️ **WIP, untested.** Continuously scans for BLE devices, sorted by RSSI with a per-device sighting counter. |
+| `ble_scanner` | `ble`, `prevent_sleep`, `vfat` | Continuously scans for BLE devices, sorted by RSSI with a per-device sighting counter. |
 | `sdk_probe` | (many) | Serial diagnostic that exercises every SDK binding once. Reference for the full capability surface. |
 
 #### A note on `home_assistant`
