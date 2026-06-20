@@ -145,11 +145,20 @@ extern "C" {
                                           candidates: *const u8, count: u32,
                                           out_font_id: *mut u8) -> c_int;
     pub fn host_view_canvas_set_text_color(inverted: bool) -> c_int;
+    pub fn host_view_canvas_set_shade(shade: u8) -> c_int;
     pub fn host_view_canvas_draw_text(x: i16, y: i16, text: *const c_char) -> c_int;
     pub fn host_view_canvas_draw_text_aligned(x: i16, y: i16, w: i16,
                                                text: *const c_char, align: u8) -> c_int;
     pub fn host_view_canvas_draw_rect(x: i16, y: i16, w: i16, h: i16, filled: bool) -> c_int;
-    pub fn host_view_canvas_invert_rect(x: i16, y: i16, w: i16, h: i16) -> c_int;
+    pub fn host_view_canvas_draw_pixel(x: i16, y: i16) -> c_int;
+    pub fn host_view_canvas_draw_line(x0: i16, y0: i16, x1: i16, y1: i16) -> c_int;
+    pub fn host_view_canvas_draw_circle(x: i16, y: i16, r: i16, filled: bool) -> c_int;
+    pub fn host_view_canvas_draw_triangle(x0: i16, y0: i16, x1: i16, y1: i16,
+                                          x2: i16, y2: i16, filled: bool) -> c_int;
+    pub fn host_view_canvas_draw_round_rect(x: i16, y: i16, w: i16, h: i16,
+                                            r: i16, filled: bool) -> c_int;
+    pub fn host_view_canvas_draw_bitmap(x: i16, y: i16, w: i16, h: i16,
+                                        data: *const u8, len: usize) -> c_int;
     pub fn host_view_canvas_hline(x: i16, y: i16, w: i16) -> c_int;
     pub fn host_view_canvas_vline(x: i16, y: i16, h: i16) -> c_int;
     pub fn host_view_canvas_commit(full_refresh: bool) -> c_int;

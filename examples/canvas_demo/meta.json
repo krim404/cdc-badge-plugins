@@ -1,0 +1,22 @@
+{
+  "id": "canvas_demo",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "info",
+  "host_api_level_min": "0.7",
+  "linear_memory_kb": 64,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": {
+        "en": "Canvas Demo"
+      },
+      "description": {
+        "en": "Steps through canvas drawing primitives, bitmaps and CP437 symbols. Y next, N exit."
+      }
+    },
+    "strings": {}
+  },
+  "capabilities": {},
+  "prerequisites": {}
+}

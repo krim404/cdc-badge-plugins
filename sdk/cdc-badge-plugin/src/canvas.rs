@@ -38,6 +38,17 @@ pub const FONT_BOLD_18PT: u8 = 3;
 /// \brief FreeMonoBold 24pt; ASCII only.
 pub const FONT_BOLD_24PT: u8 = 4;
 
+/// \brief Fill ink: nothing drawn (white).
+pub const SHADE_NONE: u8 = 0;
+/// \brief Fill ink: ~25% dithered grey.
+pub const SHADE_LIGHT: u8 = 64;
+/// \brief Fill ink: ~50% dithered grey.
+pub const SHADE_MEDIUM: u8 = 128;
+/// \brief Fill ink: ~75% dithered grey.
+pub const SHADE_DARK: u8 = 192;
+/// \brief Fill ink: solid black (default).
+pub const SHADE_SOLID: u8 = 255;
+
 /// \brief Push a fresh canvas view onto the badge view stack.
 ///
 /// \param title Header title (empty for no header bar).
@@ -122,6 +133,15 @@ pub fn set_text_inverted(inverted: bool) {
     unsafe { ffi::host_view_canvas_set_text_color(inverted) };
 }
 
+/// \brief Set the fill ink for subsequent filled shapes (rect, circle, triangle).
+///
+/// `SHADE_NONE` (0) draws nothing, `SHADE_SOLID` (255, the default) fills solid
+/// black; values between dither an ordered-grey approximation (~64 levels) so the
+/// 1-bpp panel can fake grey fills. Outlines, lines, text and bitmaps stay solid.
+pub fn set_shade(shade: u8) {
+    unsafe { ffi::host_view_canvas_set_shade(shade) };
+}
+
 /// \brief Draw text at (x, y).
 pub fn draw_text(x: i16, y: i16, text: &str) {
     if let Ok(c) = CString::new(text) {
@@ -145,9 +165,37 @@ pub fn draw_rect(x: i16, y: i16, w: i16, h: i16, filled: bool) {
     unsafe { ffi::host_view_canvas_draw_rect(x, y, w, h, filled) };
 }
 
-/// \brief Invert pixels inside a rectangle.
-pub fn invert_rect(x: i16, y: i16, w: i16, h: i16) {
-    unsafe { ffi::host_view_canvas_invert_rect(x, y, w, h) };
+/// \brief Draw a single pixel.
+pub fn draw_pixel(x: i16, y: i16) {
+    unsafe { ffi::host_view_canvas_draw_pixel(x, y) };
+}
+
+/// \brief Draw a line between two points.
+pub fn draw_line(x0: i16, y0: i16, x1: i16, y1: i16) {
+    unsafe { ffi::host_view_canvas_draw_line(x0, y0, x1, y1) };
+}
+
+/// \brief Draw a circle (filled = solid, else outline), radius `r` centred at (x, y).
+pub fn draw_circle(x: i16, y: i16, r: i16, filled: bool) {
+    unsafe { ffi::host_view_canvas_draw_circle(x, y, r, filled) };
+}
+
+/// \brief Draw a triangle through three points (filled = solid, else outline).
+pub fn draw_triangle(x0: i16, y0: i16, x1: i16, y1: i16, x2: i16, y2: i16, filled: bool) {
+    unsafe { ffi::host_view_canvas_draw_triangle(x0, y0, x1, y1, x2, y2, filled) };
+}
+
+/// \brief Draw a rounded rectangle (filled = solid, else outline), corner radius `r`.
+pub fn draw_round_rect(x: i16, y: i16, w: i16, h: i16, r: i16, filled: bool) {
+    unsafe { ffi::host_view_canvas_draw_round_rect(x, y, w, h, r, filled) };
+}
+
+/// \brief Draw a 1-bpp bitmap; set bits render black, unset bits are transparent.
+///
+/// Rows are byte-padded (stride = `(w + 7) / 8`), MSB first. `data` must hold
+/// at least `stride * h` bytes; the host copies it, so it may be reused after.
+pub fn draw_bitmap(x: i16, y: i16, w: i16, h: i16, data: &[u8]) {
+    unsafe { ffi::host_view_canvas_draw_bitmap(x, y, w, h, data.as_ptr(), data.len()) };
 }
 
 /// \brief Draw a horizontal line.

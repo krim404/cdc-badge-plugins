@@ -623,15 +623,23 @@ fn probe_canvas() {
         )
     ));
     canvas::set_text_inverted(false);
-    // Drawing primitives: text, aligned text, outlined and filled rectangles,
-    // inverted region, and lines.
+    // Drawing primitives: text, aligned text, rectangles, lines, pixel, circle,
+    // triangle, rounded rectangle, and a 1-bpp bitmap.
     canvas::draw_text(0, 10, "probe");
     canvas::draw_text_aligned(0, 24, w as i16, "centered", canvas::ALIGN_CENTER);
-    canvas::draw_rect(2, 40, 20, 12, false);   // outline
-    canvas::draw_rect(26, 40, 20, 12, true);   // filled
-    canvas::invert_rect(2, 40, 8, 6);
+    canvas::draw_rect(2, 40, 20, 12, false);    // outline
+    canvas::draw_rect(26, 40, 20, 12, true);    // filled
     canvas::hline(0, 60, 80);
     canvas::vline(0, 0, 60);
+    canvas::draw_pixel(54, 42);
+    canvas::draw_line(52, 54, 78, 40);          // diagonal
+    canvas::draw_circle(96, 46, 8, false);      // outline
+    canvas::draw_circle(120, 46, 8, true);      // filled
+    canvas::draw_triangle(140, 54, 156, 38, 172, 54, false);
+    canvas::draw_round_rect(180, 38, 28, 16, 4, false);
+    // 8x8 checkerboard bitmap (1 bpp, MSB first, one byte per row).
+    let checker: [u8; 8] = [0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55];
+    canvas::draw_bitmap(214, 38, 8, 8, &checker);
     line("canvas: draw primitives done");
     // Add interactive widgets, each with a unique id you choose.
     canvas::add_slider(1, 0, 100, 50, 5);   // id 1: min, max, initial, step
