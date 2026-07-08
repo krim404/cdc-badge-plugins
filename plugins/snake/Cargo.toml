@@ -1,0 +1,13 @@
+[package]
+name = "snake"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# cdylib for the badge, rlib so `cargo test` can run the pure game logic on the host.
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+cdc-badge-plugin = { path = "../../sdk/cdc-badge-plugin", features = ["panic_handler"] }

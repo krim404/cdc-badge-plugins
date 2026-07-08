@@ -14,17 +14,34 @@ fn main() {
     let header = fs::read_to_string(&header_path)
         .unwrap_or_else(|e| panic!("read {}: {}", header_path.display(), e));
 
-    let prefixes = ["UI_ICON_", "HOST_OK", "HOST_ERR_", "LOG_LEVEL_"];
+    let prefixes = [
+        "UI_ICON_",
+        "HOST_OK",
+        "HOST_ERR_",
+        "LOG_LEVEL_",
+        "HOST_EXT_FEATURE_",
+        "HOST_MSG_",
+        "HOST_VCARD_",
+        "HOST_SURFACE_",
+        "HOST_SPRITE_",
+        "HOST_ANIM_",
+        "HOST_EASE_",
+        "HOST_CANVAS_ANIM_",
+    ];
 
     let mut values: HashMap<String, String> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
 
     for raw in header.lines() {
         let line = raw.trim();
-        let Some(rest) = line.strip_prefix("#define ") else { continue; };
+        let Some(rest) = line.strip_prefix("#define ") else {
+            continue;
+        };
         let mut parts = rest.splitn(2, |c: char| c.is_whitespace());
         let name = parts.next().unwrap_or("").trim().to_string();
-        let Some(value_part) = parts.next() else { continue; };
+        let Some(value_part) = parts.next() else {
+            continue;
+        };
         if !prefixes.iter().any(|p| name.starts_with(p)) {
             continue;
         }
@@ -53,7 +70,10 @@ fn main() {
         } else {
             "core::ffi::c_int"
         };
-        out.push_str(&format!("pub const {}: {} = {};\n", name, rust_type, rendered));
+        out.push_str(&format!(
+            "pub const {}: {} = {};\n",
+            name, rust_type, rendered
+        ));
     }
 
     let out_dir = env::var("OUT_DIR").unwrap();
@@ -66,7 +86,9 @@ fn render_value(value: &str, all: &HashMap<String, String>, _self_name: &str) ->
     if v.starts_with("0x") || v.starts_with("0X") {
         return Some(v.to_string());
     }
-    if v.chars().all(|c| c.is_ascii_digit() || c == '-' || c == '+') {
+    if v.chars()
+        .all(|c| c.is_ascii_digit() || c == '-' || c == '+')
+    {
         return Some(v.to_string());
     }
     if let Some(_other) = all.get(v) {

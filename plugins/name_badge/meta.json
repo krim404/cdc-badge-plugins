@@ -1,0 +1,34 @@
+{
+  "id": "name_badge",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "male",
+  "host_api_level_min": "0.8",
+  "linear_memory_kb": 128,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": { "en": "Name Badge", "de": "Namensschild" },
+      "description": {
+        "en": "Turns the badge into an animated name tag: one line of text, eight rotating e-paper effects.",
+        "de": "Macht das Badge zum animierten Namensschild: eine Textzeile, acht wechselnde E-Paper-Effekte."
+      }
+    },
+    "strings": {
+      "name_prompt":   { "en": "Your name",           "de": "Dein Name" },
+      "placeholder":   { "en": "Your Name",           "de": "Dein Name" },
+      "menu_title":    { "en": "Name badge",          "de": "Namensschild" },
+      "menu_set_name": { "en": "Set name",            "de": "Name eingeben" },
+      "menu_auto_on":  { "en": "Auto-rotate: on",     "de": "Auto-Wechsel: an" },
+      "menu_auto_off": { "en": "Auto-rotate: off",    "de": "Auto-Wechsel: aus" },
+      "auto_on":       { "en": "Auto-rotate enabled", "de": "Auto-Wechsel aktiv" },
+      "auto_off":      { "en": "Auto-rotate off",     "de": "Auto-Wechsel aus" }
+    }
+  },
+  "capabilities": {
+    "prevent_sleep": true,
+    "ui_exclusive": true,
+    "nvs_namespace": "plg_namebadge"
+  },
+  "prerequisites": {}
+}

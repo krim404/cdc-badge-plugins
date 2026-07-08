@@ -12,7 +12,7 @@ extern crate alloc;
 
 use alloc::format;
 use cdc_badge_plugin::{
-    event, gpio, i18n, lockscreen, log, nvs, pixel_strip, plugin_main, power, sysinfo,
+    event, gpio, i18n, lifecycle, lockscreen, log, nvs, pixel_strip, plugin_main, power, sysinfo,
     ui::{self, ListBuilder, SliderBuilder},
 };
 
@@ -407,6 +407,9 @@ pub extern "C" fn plugin_init() -> i32 {
     }
     let _ = event::subscribe(event::SYSTEM_SLEEP | event::SYSTEM_WAKE, ACT_EVENT);
     let _ = lockscreen::register("menu_enable", ACT_LOCK_TOGGLE);
+    // The background/autoload capabilities are permission only; request actual
+    // residency so this strip driver keeps running (host API 0.8+).
+    let _ = lifecycle::set_resident(true);
     update_caffeinate();
     log::info(TAG, "grove_led initialised");
     0

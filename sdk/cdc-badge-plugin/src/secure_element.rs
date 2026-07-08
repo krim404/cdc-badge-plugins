@@ -83,7 +83,9 @@ pub fn delete(name: &str) -> Result<()> {
 /// \brief Whether the named ECC key currently holds key material.
 /// \param name Key name declared in `capabilities.ecc`.
 pub fn exists(name: &str) -> bool {
-    let Ok(c) = CString::new(name) else { return false };
+    let Ok(c) = CString::new(name) else {
+        return false;
+    };
     unsafe { host_ecc_exists(c.as_ptr()) != 0 }
 }
 

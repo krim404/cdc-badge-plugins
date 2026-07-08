@@ -34,7 +34,7 @@ pub fn get_blob(key: &str, max_len: usize) -> Option<Vec<u8>> {
 /// \return `Ok(())` on success, `Err` on failure.
 pub fn set_blob(key: &str, value: &[u8]) -> Result<()> {
     let k = CString::new(key).map_err(|_| Error::InvalidArg)?;
-    check(unsafe { ffi::host_nvs_set_blob(k.as_ptr(), value.as_ptr(), value.len()) })
+    check(unsafe { ffi::host_nvs_set_blob(k.as_ptr(), crate::slice_ptr(value), value.len()) })
 }
 
 /// \brief Read a UTF-8 string from NVS.

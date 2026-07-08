@@ -16,7 +16,7 @@ use core::ffi::c_int;
 /// \brief Major part of the host API level this SDK targets.
 pub const HOST_API_LEVEL_MAJOR: u16 = 0;
 /// \brief Minor part of the host API level this SDK targets.
-pub const HOST_API_LEVEL_MINOR: u16 = 7;
+pub const HOST_API_LEVEL_MINOR: u16 = 8;
 
 /// \brief Unified error type for every fallible host API call.
 ///
@@ -98,34 +98,55 @@ pub fn check(code: c_int) -> Result<()> {
     }
 }
 
+/// \brief FFI-safe pointer for an input slice passed with a separate length.
+///
+/// An empty slice's `as_ptr()` is a dangling non-null placeholder pointer;
+/// hand the host null instead (it must not read anything at length 0).
+pub(crate) fn slice_ptr<T>(s: &[T]) -> *const T {
+    if s.is_empty() {
+        core::ptr::null()
+    } else {
+        s.as_ptr()
+    }
+}
+
+pub mod anim;
 pub mod ble;
 pub mod canvas;
 pub mod cmd;
 pub mod crypto;
 pub mod display;
 pub mod event;
+pub mod feature;
 pub mod ffi;
 pub mod fs;
 pub mod gpio;
 pub mod http;
 pub mod i18n;
 pub mod i2c;
+pub mod image;
 pub mod keypad;
+pub mod lifecycle;
 pub mod lockscreen;
 pub mod log;
 pub mod msg;
+pub mod net;
 pub mod nvs;
 pub mod pixel_strip;
 pub mod power;
+pub mod qr;
 pub mod random;
 pub mod rmem;
 pub mod sao;
 pub mod secure_element;
 pub mod socket;
+pub mod sprite;
+pub mod surface;
 pub mod sysinfo;
 pub mod time;
 pub mod ui;
 pub mod usb;
+pub mod vcard;
 pub mod wifi;
 
 #[cfg(all(feature = "allocator", target_arch = "wasm32"))]

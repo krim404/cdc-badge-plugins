@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "author": "krim",
   "icon": "info",
-  "host_api_level_min": "0.7",
+  "host_api_level_min": "0.8",
   "linear_memory_kb": 128,
   "i18n": {
     "default_language": "en",
@@ -16,8 +16,12 @@
       }
     },
     "strings": {
-      "running": { "en": "SDK probe running..." },
-      "done": { "en": "SDK probe done" }
+      "running": {
+        "en": "SDK probe running..."
+      },
+      "done": {
+        "en": "SDK probe done"
+      }
     }
   },
   "capabilities": {
@@ -31,12 +35,29 @@
     "usb_cdc": true,
     "vfat": true,
     "nvs_namespace": "plg_sdk_probe",
-    "rmem": ["probe"],
-    "ecc": ["probe"],
-    "gpio_pins": [15, 16],
-    "pwm_pins": [15],
-    "adc_pins": [4],
-    "i2c_bus": [1]
+    "rmem": [
+      "probe"
+    ],
+    "ecc": [
+      "probe"
+    ],
+    "gpio_pins": [
+      15,
+      16
+    ],
+    "pwm_pins": [
+      15
+    ],
+    "adc_pins": [
+      4
+    ],
+    "i2c_bus": [
+      1
+    ],
+    "vcard": true,
+    "provides": [
+      "probe_echo"
+    ]
   },
   "prerequisites": {}
 }

@@ -67,6 +67,11 @@ pub fn hex(tag: &str, label: &str, data: &[u8]) {
         Err(_) => return,
     };
     unsafe {
-        ffi::host_log_hex(tag_c.as_ptr(), label_c.as_ptr(), data.as_ptr(), data.len());
+        ffi::host_log_hex(
+            tag_c.as_ptr(),
+            label_c.as_ptr(),
+            crate::slice_ptr(data),
+            data.len(),
+        );
     }
 }

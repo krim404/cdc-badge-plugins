@@ -61,6 +61,20 @@ pub fn is_busy() -> bool {
     unsafe { host_display_is_busy() != 0 }
 }
 
+/// \brief Set the backlight level (`0` = off, panel maximum ~`1023`).
+///
+/// Applied live and clamped to the panel maximum by the host. The value is
+/// NOT persisted to NVS. Unlike the drawing calls above this needs no
+/// `display_lowlevel` capability.
+pub fn set_backlight(level: u16) -> Result<()> {
+    check(unsafe { host_display_set_backlight(level) })
+}
+
+/// \brief Current backlight level (`0` when no display is available).
+pub fn backlight() -> u16 {
+    unsafe { host_display_get_backlight() }
+}
+
 #[link(wasm_import_module = "cdc")]
 extern "C" {
     fn host_display_width() -> u16;
@@ -73,4 +87,6 @@ extern "C" {
     fn host_display_draw_text(x: i16, y: i16, text: *const c_char, size: u8, color: u16) -> c_int;
     fn host_display_flush(refresh_mode: u8) -> c_int;
     fn host_display_is_busy() -> c_int;
+    fn host_display_set_backlight(level: u16) -> c_int;
+    fn host_display_get_backlight() -> u16;
 }

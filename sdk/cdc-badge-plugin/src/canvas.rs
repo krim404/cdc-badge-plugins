@@ -85,6 +85,20 @@ pub fn clear() {
     unsafe { ffi::host_view_canvas_clear() };
 }
 
+/// \brief Keep sprite assets across [`clear_ex`] (their playback stops).
+pub const CLEAR_KEEP_SPRITES: u32 = 0x01;
+
+/// \brief Erase the body like [`clear`], with options.
+///
+/// [`CLEAR_KEEP_SPRITES`] keeps the sprite sheets (frames, masks, flags,
+/// scale, current frame) so a plugin can create them once and rebuild
+/// screens around them; playback is stopped - call
+/// [`crate::sprite::Sprite::play`] again after re-recording the screen.
+/// Elements, tweens and widgets are dropped either way.
+pub fn clear_ex(flags: u32) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_clear_ex(flags) })
+}
+
 /// \brief Set the text size used by subsequent text draws (1..3).
 pub fn set_text_size(size: u8) {
     unsafe { ffi::host_view_canvas_set_text_size(size) };
@@ -116,7 +130,7 @@ pub fn pick_font_that_fits(text: &str, max_width_px: i16, candidates: &[u8]) -> 
         ffi::host_text_pick_font_that_fits(
             c.as_ptr(),
             max_width_px,
-            candidates.as_ptr(),
+            crate::slice_ptr(candidates),
             candidates.len() as u32,
             &mut out,
         )
@@ -195,7 +209,7 @@ pub fn draw_round_rect(x: i16, y: i16, w: i16, h: i16, r: i16, filled: bool) {
 /// Rows are byte-padded (stride = `(w + 7) / 8`), MSB first. `data` must hold
 /// at least `stride * h` bytes; the host copies it, so it may be reused after.
 pub fn draw_bitmap(x: i16, y: i16, w: i16, h: i16, data: &[u8]) {
-    unsafe { ffi::host_view_canvas_draw_bitmap(x, y, w, h, data.as_ptr(), data.len()) };
+    unsafe { ffi::host_view_canvas_draw_bitmap(x, y, w, h, crate::slice_ptr(data), data.len()) };
 }
 
 /// \brief Draw a horizontal line.
@@ -214,6 +228,158 @@ pub fn vline(x: i16, y: i16, h: i16) {
 ///                     triggers a partial refresh.
 pub fn commit(full_refresh: bool) {
     unsafe { ffi::host_view_canvas_commit(full_refresh) };
+}
+
+/// \brief Start recording draw calls under element `elem_id`.
+///
+/// Elements group draw commands so they can later be moved, hidden or removed
+/// without rebuilding the whole display list. They are the building block for
+/// animations on the e-paper panel: record an element once, then per frame
+/// only adjust its offset ([`elem_set_offset`] / [`elem_move`]) and [`commit`],
+/// instead of re-sending every draw call.
+///
+/// The element is created on first use; a second `elem_begin` with the same id
+/// appends further commands to it. Element ids have their own namespace
+/// (unrelated to widget ids); at most 16 elements can exist at once. [`clear`]
+/// drops all elements together with the display list.
+///
+/// ```ignore
+/// canvas::elem_begin(ELEM_BALL)?;
+/// canvas::draw_circle(0, 0, 6, true);   // recorded relative to (0, 0)
+/// canvas::elem_end();
+/// // per animation step:
+/// canvas::elem_set_offset(ELEM_BALL, x, y);
+/// canvas::commit(false);
+/// ```
+///
+/// \return `Ok(())`, `Err` for id 0 or a full element table.
+pub fn elem_begin(elem_id: u32) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_elem_begin(elem_id) })
+}
+
+/// \brief Stop recording draw calls into an element.
+///
+/// Subsequent draw calls are untagged (static background). Switching to
+/// another element via [`elem_begin`] ends the previous one implicitly.
+pub fn elem_end() {
+    unsafe { ffi::host_view_canvas_elem_end() };
+}
+
+/// \brief Set an element's offset relative to its recorded coordinates.
+///
+/// Applied on replay; call [`commit`] afterwards to show the change.
+/// `(0, 0)` restores the recorded position.
+/// \return `Ok(())`, `Err` for an unknown element id.
+pub fn elem_set_offset(elem_id: u32, ox: i16, oy: i16) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_elem_set_offset(elem_id, ox, oy) })
+}
+
+/// \brief Shift an element's offset by a delta.
+/// \return `Ok(())`, `Err` for an unknown element id.
+pub fn elem_move(elem_id: u32, dx: i16, dy: i16) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_elem_move(elem_id, dx, dy) })
+}
+
+/// \brief Show or hide an element (hidden elements are skipped on replay).
+///
+/// Hiding keeps the element recorded, so it can be shown again cheaply
+/// (blink patterns). Call [`commit`] afterwards.
+/// \return `Ok(())`, `Err` for an unknown element id.
+pub fn elem_show(elem_id: u32, visible: bool) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_elem_show(elem_id, visible) })
+}
+
+/// \brief Remove an element and all draw commands recorded under it.
+///
+/// Display-list slots and arena bytes are reclaimed, so an element can be
+/// removed and re-recorded repeatedly (a sprite whose content changes).
+/// Call [`commit`] afterwards.
+/// \return `Ok(())`, `Err` for an unknown element id.
+pub fn elem_remove(elem_id: u32) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_elem_remove(elem_id) })
+}
+
+/// \brief Drop only an element's draw commands, keeping the element itself.
+///
+/// Offset, visibility, z layer and running tweens survive; follow with
+/// [`elem_begin`] plus draw calls to re-record the content in place (live
+/// counters, changing labels).
+pub fn elem_clear(elem_id: u32) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_elem_clear(elem_id) })
+}
+
+/// \brief Set an element's replay layer (-128..127, default 0).
+///
+/// Layers draw in ascending order; untagged commands live in layer 0. Ties
+/// keep recording order.
+pub fn elem_set_z(elem_id: u32, z: i8) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_elem_set_z(elem_id, z) })
+}
+
+/// \brief Read an element's current replay offset.
+pub fn elem_offset(elem_id: u32) -> Result<(i16, i16)> {
+    let mut ox: i16 = 0;
+    let mut oy: i16 = 0;
+    check(unsafe { ffi::host_view_canvas_elem_get_offset(elem_id, &mut ox, &mut oy) })?;
+    Ok((ox, oy))
+}
+
+/// \brief Bounding box `(x, y, w, h)` of an element's recorded commands with
+///        its offset applied, in body-local pixels.
+pub fn elem_bounds(elem_id: u32) -> Result<(i16, i16, u16, u16)> {
+    let mut x: i16 = 0;
+    let mut y: i16 = 0;
+    let mut w: u16 = 0;
+    let mut h: u16 = 0;
+    check(unsafe {
+        ffi::host_view_canvas_elem_get_bounds(elem_id, &mut x, &mut y, &mut w, &mut h)
+    })?;
+    Ok((x, y, w, h))
+}
+
+/// \brief Record a draw of a sprite's current frame at `(x, y)`.
+///
+/// Draw-by-reference: frame changes from [`crate::sprite`] playback replay
+/// automatically. Record it inside an element to move, hide, layer or tween
+/// the sprite.
+pub fn draw_sprite(x: i16, y: i16, sprite: u32) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_draw_sprite(x, y, sprite) })
+}
+
+/// \brief Flash-free while animating + one FAST cleanup after idle (default).
+pub const ANIM_REFRESH_AUTO: u8 = 0;
+/// \brief Never clean up automatically; the plugin manages ghosting itself.
+pub const ANIM_REFRESH_LIGHT: u8 = 1;
+
+/// \brief Configure host-driven animation pacing.
+///
+/// `max_fps` caps the animation step rate at 1..5 (0 = default 4); the
+/// e-paper partial waveform makes ~5 fps the physical ceiling, so design
+/// tweens with durations of 500 ms and up.
+pub fn set_anim_policy(refresh_policy: u8, max_fps: u8) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_set_anim_policy(refresh_policy, max_fps) })
+}
+
+/// \brief Draw subsequent shapes in white instead of black - an eraser for
+///        wipe transitions and cut-outs. Text keeps [`set_text_inverted`].
+pub fn set_ink_white(white: bool) -> Result<()> {
+    check(unsafe { ffi::host_view_canvas_set_ink(white) })
+}
+
+/// \brief Record a host-driven text marquee: a `window_w`-wide window
+///        scrolls seamlessly through the text (rendered once with the
+///        current font/size). Returns the backing sprite handle
+///        ([`crate::sprite::Sprite::from_handle`] to stop/destroy it).
+pub fn marquee(x: i16, y: i16, window_w: i16, text: &str, step_px: u16,
+               frame_ms: u16) -> Result<u32> {
+    let c = CString::new(text).unwrap_or_default();
+    let rc = unsafe {
+        ffi::host_view_canvas_marquee(x, y, window_w, c.as_ptr(), step_px, frame_ms)
+    };
+    if rc <= 0 {
+        return Err(crate::Error::from_code(rc));
+    }
+    Ok(rc as u32)
 }
 
 /// \brief Add a slider widget. Host steps the value on left/right keys.
@@ -247,7 +413,11 @@ pub fn set_value(widget_id: u32, value: i32) {
 pub fn get_value(widget_id: u32) -> Option<i32> {
     let mut out: i32 = 0;
     let rc = unsafe { ffi::host_view_canvas_get_value(widget_id, &mut out) };
-    if rc == ffi::HOST_OK { Some(out) } else { None }
+    if rc == ffi::HOST_OK {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// \brief Overwrite a text widget's buffer.

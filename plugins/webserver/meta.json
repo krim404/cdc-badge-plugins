@@ -1,0 +1,32 @@
+{
+  "id": "webserver",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "info",
+  "host_api_level_min": "0.8",
+  "linear_memory_kb": 128,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": { "en": "Webserver", "de": "Webserver" },
+      "description": {
+        "en": "Serves files from its vFAT folder over HTTP on port 80. Demonstrates the inbound TCP listener.",
+        "de": "Stellt Dateien aus dem vFAT-Ordner per HTTP auf Port 80 bereit. Demonstriert den TCP-Listener."
+      }
+    },
+    "strings": {
+      "no_ip":  { "en": "No WiFi / IP", "de": "Kein WLAN / IP" },
+      "served": { "en": "Served", "de": "Ausgeliefert" }
+    }
+  },
+  "capabilities": {
+    "net_listen": true,
+    "wifi": true,
+    "vfat": true,
+    "background": true,
+    "autoload": true,
+    "ui_exclusive": false,
+    "nvs_namespace": "plg_webserver"
+  },
+  "prerequisites": {}
+}

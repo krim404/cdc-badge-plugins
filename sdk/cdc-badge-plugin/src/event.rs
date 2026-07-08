@@ -28,8 +28,11 @@ pub const SYSTEM_WAKE: u32 = 1 << 11;
 pub const BLE_CONNECTED: u32 = 1 << 12;
 pub const BLE_DISCONNECTED: u32 = 1 << 13;
 pub const TIMER_TICK: u32 = 1 << 14;
-pub const LANGUAGE_CHANGED: u32 = 1 << 15;
-pub const MODULE_EVENT: u32 = 1 << 16;
+pub const MODULE_EVENT: u32 = 1 << 15;
+/// A FAST or FULL e-paper refresh is in progress: `plugin_on_action`'s
+/// `user_data` is 1 at begin and 0 at end. Subscribe to pause animation/game
+/// logic while the panel is unreadable.
+pub const DISPLAY_REFRESH: u32 = 1 << 16;
 
 /// \brief Subscribe to one or more event types.
 /// \param event_mask Bitwise-OR of the event constants in this module.

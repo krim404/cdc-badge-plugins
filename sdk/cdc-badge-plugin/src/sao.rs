@@ -29,7 +29,7 @@ pub fn eeprom_read(offset: u16, len: usize) -> Result<Vec<u8>> {
 /// \param data   Bytes to write.
 /// \return `Ok(())` on success, `Err` on failure.
 pub fn eeprom_write(offset: u16, data: &[u8]) -> Result<()> {
-    check(unsafe { host_sao_eeprom_write(offset, data.as_ptr(), data.len()) })
+    check(unsafe { host_sao_eeprom_write(offset, crate::slice_ptr(data), data.len()) })
 }
 
 #[link(wasm_import_module = "cdc")]

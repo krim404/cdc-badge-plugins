@@ -41,7 +41,13 @@ fn lookup(
         return "";
     };
     let mut buf = [0u8; SCRATCH_CAP];
-    let n = unsafe { host_fn(k.as_ptr(), buf.as_mut_ptr() as *mut c_char, buf.len() as u32) };
+    let n = unsafe {
+        host_fn(
+            k.as_ptr(),
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len() as u32,
+        )
+    };
     if n <= 0 {
         return "";
     }

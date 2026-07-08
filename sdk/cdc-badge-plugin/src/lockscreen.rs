@@ -6,8 +6,8 @@
 //! fires.
 
 use crate::{check, Error, Result};
-use core::ffi::{c_char, c_int};
 use alloc::ffi::CString;
+use core::ffi::{c_char, c_int};
 
 #[link(wasm_import_module = "cdc")]
 extern "C" {
@@ -28,7 +28,9 @@ pub fn register(label_key: &str, action_id: u32) -> Result<()> {
 
 /// \brief Drop a previously registered lockscreen quick-action.
 pub fn unregister() {
-    unsafe { host_lockscreen_unregister_action(); }
+    unsafe {
+        host_lockscreen_unregister_action();
+    }
 }
 
 /// \brief Raise a persistent Y/N alert over the current screen, lock screen

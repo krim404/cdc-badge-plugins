@@ -32,7 +32,7 @@ impl Socket {
 
     fn write(&self, data: &[u8], timeout_ms: u32) -> Result<usize> {
         let rc = unsafe {
-            host_socket_write(self.handle, data.as_ptr(), data.len(), timeout_ms)
+            host_socket_write(self.handle, crate::slice_ptr(data), data.len(), timeout_ms)
         };
         if rc < 0 {
             Err(Error::from_code(rc))
@@ -42,9 +42,7 @@ impl Socket {
     }
 
     fn read(&self, out: &mut [u8], timeout_ms: u32) -> Result<usize> {
-        let rc = unsafe {
-            host_socket_read(self.handle, out.as_mut_ptr(), out.len(), timeout_ms)
-        };
+        let rc = unsafe { host_socket_read(self.handle, out.as_mut_ptr(), out.len(), timeout_ms) };
         if rc < 0 {
             Err(Error::from_code(rc))
         } else {
@@ -72,6 +70,12 @@ impl TcpStream {
     /// \return A live stream handle on success.
     pub fn connect(host: &str, port: u16, timeout_ms: u32) -> Result<Self> {
         Ok(Self(Socket::open(HOST_SOCK_TCP, host, port, timeout_ms)?))
+    }
+
+    /// \brief Wrap a socket handle already opened by the host (e.g. an inbound
+    ///        connection from [`crate::net::accept`]). Closed on drop.
+    pub(crate) fn from_handle(handle: c_int) -> Self {
+        Self(Socket { handle })
     }
 
     /// \brief Write bytes to the stream.

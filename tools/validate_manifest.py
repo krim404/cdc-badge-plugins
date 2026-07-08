@@ -26,6 +26,7 @@ KNOWN_CAPABILITIES = {
     "message_types", "nvs_namespace", "display_lowlevel", "ui_exclusive",
     "usb_cdc", "gpio_pins", "pwm_pins", "adc_pins", "i2c_bus", "sao", "grove",
     "pixel_strip", "background", "autoload", "prevent_sleep", "vfat",
+    "vcard", "provides", "net_listen",
 }
 
 

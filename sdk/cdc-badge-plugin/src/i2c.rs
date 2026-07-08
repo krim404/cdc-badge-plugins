@@ -15,7 +15,7 @@ use core::ffi::c_int;
 /// \param data Payload to send.
 /// \return `Ok(())` on success, `Err` on failure or NACK.
 pub fn write(bus: u8, addr: u8, data: &[u8]) -> Result<()> {
-    check(unsafe { host_i2c_write(bus, addr, data.as_ptr(), data.len()) })
+    check(unsafe { host_i2c_write(bus, addr, crate::slice_ptr(data), data.len()) })
 }
 
 /// \brief Read `len` bytes from an I2C device.
@@ -46,7 +46,7 @@ pub fn write_read(bus: u8, addr: u8, write: &[u8], read_len: usize) -> Result<Ve
         host_i2c_write_read(
             bus,
             addr,
-            write.as_ptr(),
+            crate::slice_ptr(write),
             write.len(),
             buf.as_mut_ptr(),
             read_len,

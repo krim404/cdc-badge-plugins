@@ -8,7 +8,7 @@ use core::ffi::c_int;
 /// \param data Bytes to transmit.
 /// \return `Ok(())` on success, `Err` on failure.
 pub fn cdc_write(data: &[u8]) -> Result<()> {
-    check(unsafe { host_usb_cdc_write(data.as_ptr(), data.len()) })
+    check(unsafe { host_usb_cdc_write(crate::slice_ptr(data), data.len()) })
 }
 
 #[link(wasm_import_module = "cdc")]

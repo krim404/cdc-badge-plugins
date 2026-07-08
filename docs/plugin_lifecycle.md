@@ -28,12 +28,18 @@ The Rust `plugin_main!()` macro generates the API-level exports for you.
 
 ## Autoload (resident at boot)
 
-A plugin with the `autoload` capability is started as a resident background
-instance at badge boot. The host calls `plugin_init` and walks the
-prerequisites, but does **not** call `plugin_on_enter`: the plugin runs
-headless with no foreground view until the user opens it. `autoload` is
-orthogonal to `background` (which only governs survival after the user leaves a
-foreground plugin). See [Capabilities](capabilities.md).
+A plugin with the `autoload` capability is loaded at badge boot: the host calls
+`plugin_init` and walks the prerequisites, but does **not** call
+`plugin_on_enter` (headless). `autoload` is orthogonal to `background` (survival
+after the user leaves a foreground plugin).
+
+**Breaking change (host API 0.8):** both `autoload` and `background` are now
+*permission only*. The plugin must call `lifecycle::set_resident(true)` to
+actually stay resident - in `plugin_init` for an autoload service, or while
+running for a background one. Without it, an autoloaded plugin is unloaded right
+after init, and a background plugin is torn down when the user leaves it. Pass
+`false` to opt back out. A resident background plugin can be stopped from the
+plugin list's `[3]` menu ("Stop background"). See [Capabilities](capabilities.md).
 
 ## Prerequisite-controlled startup
 

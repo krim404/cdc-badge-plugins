@@ -1,0 +1,12 @@
+[package]
+name = "name_badge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+cdc-badge-plugin = { path = "../../sdk/cdc-badge-plugin", features = ["panic_handler"] }

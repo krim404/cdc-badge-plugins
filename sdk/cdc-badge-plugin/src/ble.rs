@@ -42,7 +42,13 @@ impl CharDef {
     /// \param properties      Bitmask of the `PROP_*` constants.
     /// \param write_action_id Action fired on each inbound write (0 = none).
     pub fn new(uuid: [u8; 16], properties: u8, write_action_id: u32) -> Self {
-        Self { uuid, properties, reserved: [0; 3], write_action_id, char_handle: 0 }
+        Self {
+            uuid,
+            properties,
+            reserved: [0; 3],
+            write_action_id,
+            char_handle: 0,
+        }
     }
 }
 
@@ -140,9 +146,7 @@ pub fn register_service(uuid: [u8; 16], chars: &mut [CharDef]) -> Result<u32> {
         reserved: [0; 3],
         service_handle: 0,
     };
-    check(unsafe {
-        host_ble_register_service(&mut def, chars.as_mut_ptr(), chars.len() as u32)
-    })?;
+    check(unsafe { host_ble_register_service(&mut def, chars.as_mut_ptr(), chars.len() as u32) })?;
     Ok(def.service_handle)
 }
 
@@ -153,12 +157,12 @@ pub fn unregister_service(service_handle: u32) -> Result<()> {
 
 /// \brief Notify subscribers of a value on a registered characteristic.
 pub fn notify(char_handle: u32, data: &[u8]) -> Result<()> {
-    check(unsafe { host_ble_send_notification(char_handle, data.as_ptr(), data.len()) })
+    check(unsafe { host_ble_send_notification(char_handle, crate::slice_ptr(data), data.len()) })
 }
 
 /// \brief Indicate (acknowledged notify) a value on a registered characteristic.
 pub fn indicate(char_handle: u32, data: &[u8]) -> Result<()> {
-    check(unsafe { host_ble_send_indication(char_handle, data.as_ptr(), data.len()) })
+    check(unsafe { host_ble_send_indication(char_handle, crate::slice_ptr(data), data.len()) })
 }
 
 /// \brief Pull the inbound write queued for `char_handle`.
@@ -274,15 +278,51 @@ pub fn consume_read(buf: &mut [u8]) -> Result<usize> {
 /// \brief Write a value to a peer characteristic by value handle.
 pub fn write_char(conn: u32, value_handle: u16, data: &[u8], with_response: bool) -> Result<()> {
     check(unsafe {
-        host_ble_write_char(conn, value_handle, data.as_ptr(), data.len(), with_response as u8)
+        host_ble_write_char(
+            conn,
+            value_handle,
+            crate::slice_ptr(data),
+            data.len(),
+            with_response as u8,
+        )
     })
 }
 
 /// \brief Subscribe to notifications on a peer characteristic (by CCCD handle).
 ///        Each notification fires `action_id`; read it with
 ///        [`consume_notification`].
+///
+/// Low-level variant: the caller must already know the CCCD handle. Prefer
+/// [`subscribe_char`], which resolves the CCCD via descriptor discovery
+/// instead of the historical `value_handle + 1` guess.
 pub fn subscribe(conn: u32, cccd_handle: u16, action_id: u32) -> Result<()> {
     check(unsafe { host_ble_subscribe(conn, cccd_handle, action_id) })
+}
+
+/// \brief Subscribe to notifications on a peer characteristic by VALUE handle.
+///
+/// The host discovers the characteristic's CCCD descriptor and writes it
+/// (falling back to `value_handle + 1` when the peer exposes no 0x2902).
+/// Call after [`discover`] on the same connection - the last discovered
+/// service bounds the descriptor search. Each notification fires `action_id`;
+/// read it with [`consume_notification`].
+pub fn subscribe_char(conn: u32, value_handle: u16, action_id: u32) -> Result<()> {
+    check(unsafe { host_ble_subscribe_char(conn, value_handle, action_id) })
+}
+
+/// \brief Usable ATT payload of the current connection (negotiated MTU - 3).
+/// \return Payload bytes per write/notification, or 0 when not connected.
+pub fn get_mtu(conn: u32) -> u16 {
+    unsafe { host_ble_get_mtu(conn) }
+}
+
+/// \brief Register an action fired on every completed central write.
+///
+/// Fires `plugin_on_action(action_id, attr_handle, status)` per completed
+/// write (with-response completions and CCCD writes; status 0 = success).
+/// Use it to pace chunked transfers. Pass 0 to unregister.
+pub fn on_write_complete(action_id: u32) -> Result<()> {
+    check(unsafe { host_ble_on_write_complete(action_id) })
 }
 
 /// \brief Pull the next queued inbound notification.
@@ -323,9 +363,20 @@ extern "C" {
     fn host_ble_consume_discovery(out: *mut RemoteChar, count: *mut usize) -> c_int;
     fn host_ble_read_char(conn: u32, value_handle: u16, action_id: u32) -> c_int;
     fn host_ble_consume_read(buf: *mut u8, buf_size: usize) -> c_int;
-    fn host_ble_write_char(conn: u32, value_handle: u16, data: *const u8, len: usize,
-                           with_response: u8) -> c_int;
+    fn host_ble_write_char(
+        conn: u32,
+        value_handle: u16,
+        data: *const u8,
+        len: usize,
+        with_response: u8,
+    ) -> c_int;
     fn host_ble_subscribe(conn: u32, cccd_handle: u16, action_id: u32) -> c_int;
-    fn host_ble_consume_notification(value_handle_out: *mut u16, buf: *mut u8,
-                                     buf_size: usize) -> c_int;
+    fn host_ble_subscribe_char(conn: u32, value_handle: u16, action_id: u32) -> c_int;
+    fn host_ble_consume_notification(
+        value_handle_out: *mut u16,
+        buf: *mut u8,
+        buf_size: usize,
+    ) -> c_int;
+    fn host_ble_get_mtu(conn: u32) -> u16;
+    fn host_ble_on_write_complete(action_id: u32) -> c_int;
 }

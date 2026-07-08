@@ -20,10 +20,11 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_int};
 
-/// Maximum payload bytes in one transfer (mirrors `HOST_MSG_PAYLOAD_MAX`).
-pub const PAYLOAD_MAX: usize = 4096;
-/// MIME buffer size including the NUL (mirrors `HOST_MSG_MIME_MAX`).
-pub const MIME_MAX: usize = 64;
+/// Maximum payload bytes in one transfer (`HOST_MSG_PAYLOAD_MAX`,
+/// generated from the header by build.rs so it cannot drift).
+pub const PAYLOAD_MAX: usize = crate::ffi::HOST_MSG_PAYLOAD_MAX as usize;
+/// MIME buffer size including the NUL (`HOST_MSG_MIME_MAX`, generated from the header).
+pub const MIME_MAX: usize = crate::ffi::HOST_MSG_MIME_MAX as usize;
 
 /// Send flag (mirrors `HOST_MSG_FLAG_PERSIST`): remember the verified pairing
 /// for this runtime session. The first send still prompts once; follow-up sends
@@ -61,7 +62,12 @@ pub fn consume(max_len: usize) -> Option<Received> {
     let n = unsafe {
         buf.set_len(cap);
         mime.set_len(MIME_MAX);
-        host_msg_consume(buf.as_mut_ptr(), cap, mime.as_mut_ptr() as *mut c_char, MIME_MAX)
+        host_msg_consume(
+            buf.as_mut_ptr(),
+            cap,
+            mime.as_mut_ptr() as *mut c_char,
+            MIME_MAX,
+        )
     };
     if n < 0 {
         return None;
@@ -86,7 +92,9 @@ pub fn consume_text(max_len: usize) -> Option<(String, String)> {
 /// \param flags Bitwise OR of `FLAG_*` (`0` for the default behaviour).
 pub fn send_interactive_with(mime_type: &str, data: &[u8], flags: u32) -> Result<()> {
     let c = CString::new(mime_type).map_err(|_| Error::InvalidArg)?;
-    check(unsafe { host_msg_send_interactive(c.as_ptr(), data.as_ptr(), data.len(), flags) })
+    check(unsafe {
+        host_msg_send_interactive(c.as_ptr(), crate::slice_ptr(data), data.len(), flags)
+    })
 }
 
 /// \brief Send a typed payload via the firmware peer picker + consent UI.
@@ -107,11 +115,23 @@ pub fn send_text_interactive(text: &str) -> Result<()> {
 
 /// \brief Send directly to a known peer address (the peer still consents).
 /// \param flags Bitwise OR of `FLAG_*` (`0` for the default behaviour).
-pub fn send_with(addr: [u8; 6], addr_type: u8, mime_type: &str, data: &[u8],
-                 flags: u32) -> Result<()> {
+pub fn send_with(
+    addr: [u8; 6],
+    addr_type: u8,
+    mime_type: &str,
+    data: &[u8],
+    flags: u32,
+) -> Result<()> {
     let c = CString::new(mime_type).map_err(|_| Error::InvalidArg)?;
     check(unsafe {
-        host_msg_send(addr.as_ptr(), addr_type, c.as_ptr(), data.as_ptr(), data.len(), flags)
+        host_msg_send(
+            addr.as_ptr(),
+            addr_type,
+            c.as_ptr(),
+            crate::slice_ptr(data),
+            data.len(),
+            flags,
+        )
     })
 }
 
@@ -124,10 +144,24 @@ pub fn send(addr: [u8; 6], addr_type: u8, mime_type: &str, data: &[u8]) -> Resul
 extern "C" {
     fn host_msg_register_handler(mime: *const c_char, action_id: u32) -> c_int;
     fn host_msg_unregister_handler(mime: *const c_char) -> c_int;
-    fn host_msg_consume(buf: *mut u8, buf_size: usize, mime_out: *mut c_char,
-                        mime_size: usize) -> c_int;
-    fn host_msg_send_interactive(mime: *const c_char, data: *const u8, len: usize,
-                                 flags: u32) -> c_int;
-    fn host_msg_send(addr: *const u8, addr_type: u8, mime: *const c_char, data: *const u8,
-                     len: usize, flags: u32) -> c_int;
+    fn host_msg_consume(
+        buf: *mut u8,
+        buf_size: usize,
+        mime_out: *mut c_char,
+        mime_size: usize,
+    ) -> c_int;
+    fn host_msg_send_interactive(
+        mime: *const c_char,
+        data: *const u8,
+        len: usize,
+        flags: u32,
+    ) -> c_int;
+    fn host_msg_send(
+        addr: *const u8,
+        addr_type: u8,
+        mime: *const c_char,
+        data: *const u8,
+        len: usize,
+        flags: u32,
+    ) -> c_int;
 }

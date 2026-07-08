@@ -26,6 +26,9 @@ Examples:
 | `host_socket_*` | `socket: true` |
 | `host_display_*` low-level GFX | `display_lowlevel: true` |
 | `host_ble_*` (GATT server + central) | `ble: true` |
+| `host_vcard_*` (own + received vCard store) | `vcard: true` |
+| `host_ext_feature_register_handler(name, ...)` | `provides` must contain `name` |
+| `host_net_listen/accept/close` (inbound TCP server) | `net_listen: true` |
 | `host_msg_*` (badge-to-badge message transfer) | `ble: true` **and** a non-empty `message_types` |
 | `host_usb_cdc_*` | `usb_cdc: true` |
 | vFAT file storage (`host_fs_*`) | `vfat: true` |
@@ -43,9 +46,39 @@ gating a specific call:
 
 | Capability | Effect |
 |------------|--------|
-| `background` | The plugin stays loaded and keeps receiving `plugin_on_tick` after the user leaves it, instead of being unloaded. |
-| `autoload` | The plugin is started as a resident background instance at badge boot, headless (no `plugin_on_enter`). Orthogonal to `background`. See [Plugin Lifecycle](plugin_lifecycle.md). |
+| `background` | **Permission** to stay loaded and keep receiving `plugin_on_tick` after the user leaves it. The plugin must call `lifecycle::set_resident(true)` to actually stay resident; otherwise it is torn down on leave. |
+| `autoload` | **Permission** to be loaded at boot (headless, runs `plugin_init`). The plugin must call `lifecycle::set_resident(true)` in `plugin_init` to remain resident afterward; otherwise it is unloaded right after init. Orthogonal to `background`. See [Plugin Lifecycle](plugin_lifecycle.md). |
+| `net_listen` | Permission to run an inbound TCP listener with `net::listen(port, action)`; accepted connections use the normal `socket` read/write/close. |
 | `prevent_sleep` | While the plugin is loaded (foreground or background), the badge skips the lock-screen light sleep. The host registers a sleep inhibitor for the plugin on load and releases it on unload, so the caffeinated icon shows on the lock screen. Deep sleep triggered by the user is unaffected. |
+
+**Breaking change (host API 0.8):** `background` and `autoload` are now permission
+only. A plugin that relied on the capability alone to stay resident must add
+`lifecycle::set_resident(true)`. A resident background plugin can be stopped from
+the plugin list's `[3]` context menu ("Stop background").
+
+## Provided external features
+
+`provides: ["thermo_print", ...]` declares that this plugin implements the
+named features for other plugins. Names are `[a-z][a-z0-9_]*`, at most 32
+chars, at most 4 entries. Provider duties:
+
+- Register a handler for every entry in `plugin_init` via
+  `feature::register_provider(name, action_id)` - the firmware starts the
+  plugin into the foreground when a job arrives, so `plugin_init` always ran.
+- Pull the job in the handler action with `feature::consume_job` and call
+  `feature::report_result` exactly once per job.
+
+Caller side needs **no** capability: `feature::use_ext_feature(name, payload,
+status_action)` hands at most 32 KiB to the provider, which then runs in the
+foreground ("Open with" semantics). A caller without `background: true` is
+unloaded by that foreground switch and its status action is silently dropped;
+declare `background: true` when the result matters. If no installed plugin
+provides the feature, the firmware shows a "no plugin for this feature" modal
+and the call returns `NotFound`.
+
+The `thermo_print` feature (provided by the `thermo_printer` plugin) accepts the
+raw raster job format documented in
+[plugins/thermo_printer](../plugins/thermo_printer/README.md).
 
 ## Hardware shortcuts
 

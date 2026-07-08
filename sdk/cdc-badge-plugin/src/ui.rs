@@ -32,14 +32,8 @@ pub fn to_display_with(input: &str, target: u32) -> Vec<u8> {
     };
     let cap = input.len() + 32;
     let mut buf: Vec<u8> = vec![0u8; cap];
-    let rc = unsafe {
-        ffi::host_str_to_display(
-            in_c.as_ptr(),
-            buf.as_mut_ptr() as *mut _,
-            cap,
-            target,
-        )
-    };
+    let rc =
+        unsafe { ffi::host_str_to_display(in_c.as_ptr(), buf.as_mut_ptr() as *mut _, cap, target) };
     if rc != 0 {
         return Vec::new();
     }
@@ -81,16 +75,14 @@ fn to_cstring<L: AsRef<[u8]>>(label: L) -> Option<CString> {
 }
 
 pub use ffi::{
-    UI_ICON_ALERT, UI_ICON_ANGLE, UI_ICON_ARROW_DOWN, UI_ICON_ARROW_LEFT,
-    UI_ICON_ARROW_RIGHT, UI_ICON_ARROW_UP, UI_ICON_BACK, UI_ICON_BAR, UI_ICON_BULLET,
-    UI_ICON_CIRCLE, UI_ICON_CLUB, UI_ICON_COVER, UI_ICON_DIAMOND, UI_ICON_ERROR,
-    UI_ICON_FEMALE, UI_ICON_HEART, UI_ICON_INFO, UI_ICON_INVERSE_BULLET,
-    UI_ICON_INVERSE_CIRCLE, UI_ICON_LEFTRIGHT, UI_ICON_LIGHT, UI_ICON_MALE,
-    UI_ICON_MUSIC, UI_ICON_NONE, UI_ICON_NOTES, UI_ICON_PARAGRAPH, UI_ICON_PLAY,
-    UI_ICON_REMOVE, UI_ICON_REVERSE_PLAY, UI_ICON_SCENE, UI_ICON_SECTION,
-    UI_ICON_SENSOR, UI_ICON_SPADE, UI_ICON_SUCCESS, UI_ICON_SUN, UI_ICON_SWITCH,
-    UI_ICON_TASK, UI_ICON_TRIANGLE_DOWN, UI_ICON_TRIANGLE_UP, UI_ICON_UPDOWN,
-    UI_ICON_UPDOWN_BAR,
+    UI_ICON_ALERT, UI_ICON_ANGLE, UI_ICON_ARROW_DOWN, UI_ICON_ARROW_LEFT, UI_ICON_ARROW_RIGHT,
+    UI_ICON_ARROW_UP, UI_ICON_BACK, UI_ICON_BAR, UI_ICON_BULLET, UI_ICON_CIRCLE, UI_ICON_CLUB,
+    UI_ICON_COVER, UI_ICON_DIAMOND, UI_ICON_ERROR, UI_ICON_FEMALE, UI_ICON_HEART, UI_ICON_INFO,
+    UI_ICON_INVERSE_BULLET, UI_ICON_INVERSE_CIRCLE, UI_ICON_LEFTRIGHT, UI_ICON_LIGHT, UI_ICON_MALE,
+    UI_ICON_MUSIC, UI_ICON_NONE, UI_ICON_NOTES, UI_ICON_PARAGRAPH, UI_ICON_PLAY, UI_ICON_REMOVE,
+    UI_ICON_REVERSE_PLAY, UI_ICON_SCENE, UI_ICON_SECTION, UI_ICON_SENSOR, UI_ICON_SPADE,
+    UI_ICON_SUCCESS, UI_ICON_SUN, UI_ICON_SWITCH, UI_ICON_TASK, UI_ICON_TRIANGLE_DOWN,
+    UI_ICON_TRIANGLE_UP, UI_ICON_UPDOWN, UI_ICON_UPDOWN_BAR,
 };
 
 /// \brief Show a short auto-dismissing toast over the current view.
@@ -216,7 +208,7 @@ impl ListBuilder {
         unsafe {
             ffi::host_ui_push_list(
                 self.title.as_ptr(),
-                self.items.as_ptr(),
+                crate::slice_ptr(&self.items),
                 self.items.len() as u16,
                 self.select_action,
                 self.menu_action,
@@ -233,7 +225,7 @@ impl ListBuilder {
         unsafe {
             ffi::host_ui_replace_list(
                 self.title.as_ptr(),
-                self.items.as_ptr(),
+                crate::slice_ptr(&self.items),
                 self.items.len() as u16,
                 self.select_action,
                 self.menu_action,
@@ -387,7 +379,7 @@ impl ContextMenuBuilder {
         unsafe {
             ffi::host_ui_push_context_menu(
                 self.title.as_ptr(),
-                self.items.as_ptr(),
+                crate::slice_ptr(&self.items),
                 self.items.len() as u16,
                 self.select_action,
             );
@@ -527,7 +519,12 @@ pub fn consume_input_int() -> Option<i32> {
 }
 
 fn push_text_input(
-    host_fn: unsafe extern "C" fn(*const core::ffi::c_char, *const core::ffi::c_char, u16, u32) -> core::ffi::c_int,
+    host_fn: unsafe extern "C" fn(
+        *const core::ffi::c_char,
+        *const core::ffi::c_char,
+        u16,
+        u32,
+    ) -> core::ffi::c_int,
     title: &str,
     initial: Option<&str>,
     max_len: u16,
@@ -562,7 +559,13 @@ fn push_text_input(
 /// \param max_len   Maximum number of characters the user may enter.
 /// \param action_id Action id echoed back to the plugin.
 pub fn push_t9_input(title: &str, initial: Option<&str>, max_len: u16, action_id: u32) {
-    push_text_input(ffi::host_ui_push_t9_input, title, initial, max_len, action_id);
+    push_text_input(
+        ffi::host_ui_push_t9_input,
+        title,
+        initial,
+        max_len,
+        action_id,
+    );
 }
 
 /// \brief Push a password input view (masked T9).
@@ -578,7 +581,13 @@ pub fn push_t9_input(title: &str, initial: Option<&str>, max_len: u16, action_id
 /// \param max_len   Maximum number of characters the user may enter.
 /// \param action_id Action id echoed back to the plugin.
 pub fn push_password(title: &str, initial: Option<&str>, max_len: u16, action_id: u32) {
-    push_text_input(ffi::host_ui_push_password, title, initial, max_len, action_id);
+    push_text_input(
+        ffi::host_ui_push_password,
+        title,
+        initial,
+        max_len,
+        action_id,
+    );
 }
 
 /// \brief Read the text payload of the most recent T9 / password view that

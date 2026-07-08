@@ -126,6 +126,12 @@ struct Entry {
 
 static HEADLINES: PluginCell<Vec<Entry>> = PluginCell::new(Vec::new());
 static CURRENT_URL: PluginCell<String> = PluginCell::new(String::new());
+// True while the T9 URL editor is open. The KEY_PRESSED subscription keeps
+// firing while any view is on top (the host publishes key events even when
+// the view consumes the key), so the reload hotkey must stand down until
+// the editor closes - otherwise pressing '1' inside the editor re-fetches
+// and pushes a fresh list over the T9 dialog.
+static EDITING_URL: PluginCell<bool> = PluginCell::new(false);
 
 /// \brief Read the user-configured feed URL from NVS, or fall back to the
 ///        hardcoded Golem default.
@@ -433,6 +439,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             // The last argument is the action ID we want fired when
             // the dialog closes.
             let initial = CURRENT_URL.borrow().clone();
+            *EDITING_URL.borrow_mut() = true;
             ui::push_t9_input(
                 i18n::tr_key("feed_url"),
                 Some(&initial),
@@ -444,11 +451,13 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             // KEY_PRESSED dispatched from EventBus: `idx` is the event
             // type (always 0 here), `user_data` is the ASCII key code.
             let _ = idx;
-            if user_data == KEY_RELOAD {
+            if user_data == KEY_RELOAD && !*EDITING_URL.borrow() {
                 fetch_and_render();
             }
         }
         ACTION_EDIT_URL_DONE => {
+            // The editor closed (confirm or cancel) - re-arm the hotkeys.
+            *EDITING_URL.borrow_mut() = false;
             // The T9 closed. `user_data == 1` marks a confirm, `0` a cancel;
             // only persist on confirm. Either way we re-fetch below.
             if user_data == 1 {

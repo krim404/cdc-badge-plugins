@@ -1,0 +1,5 @@
+pyserial>=3.5
+# Optional: Pillow enables client-side image pre-scaling (the badge scales
+# otherwise). An `extra ==` marker never matches in `pip install -r`, so it
+# stays a comment - install manually when wanted:
+#   pip install "Pillow>=9.0"

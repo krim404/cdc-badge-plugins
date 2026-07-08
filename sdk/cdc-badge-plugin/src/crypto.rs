@@ -15,7 +15,7 @@ use core::ffi::{c_char, c_int};
 /// \return The 32-byte hash, or `Err` on failure.
 pub fn sha256(data: &[u8]) -> Result<[u8; 32]> {
     let mut out = [0u8; 32];
-    check(unsafe { host_sha256(data.as_ptr(), data.len(), out.as_mut_ptr()) })?;
+    check(unsafe { host_sha256(crate::slice_ptr(data), data.len(), out.as_mut_ptr()) })?;
     Ok(out)
 }
 
@@ -24,7 +24,13 @@ pub fn sha256(data: &[u8]) -> Result<[u8; 32]> {
 pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<[u8; 32]> {
     let mut out = [0u8; 32];
     check(unsafe {
-        host_hmac_sha256(key.as_ptr(), key.len(), data.as_ptr(), data.len(), out.as_mut_ptr())
+        host_hmac_sha256(
+            crate::slice_ptr(key),
+            key.len(),
+            crate::slice_ptr(data),
+            data.len(),
+            out.as_mut_ptr(),
+        )
     })?;
     Ok(out)
 }
@@ -42,12 +48,7 @@ pub struct GcmSealed {
 /// \param plaintext Data to encrypt.
 /// \return The ciphertext and 16-byte tag, or `Err` on bad key/iv length or
 ///         failure.
-pub fn aes_gcm_encrypt(
-    key: &[u8],
-    iv: &[u8],
-    aad: &[u8],
-    plaintext: &[u8],
-) -> Result<GcmSealed> {
+pub fn aes_gcm_encrypt(key: &[u8], iv: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<GcmSealed> {
     if key.len() != 32 || iv.len() != 12 {
         return Err(Error::InvalidArg);
     }
@@ -58,16 +59,19 @@ pub fn aes_gcm_encrypt(
         host_aes_gcm_encrypt(
             key.as_ptr(),
             iv.as_ptr(),
-            aad.as_ptr(),
+            crate::slice_ptr(aad),
             aad.len(),
-            plaintext.as_ptr(),
+            crate::slice_ptr(plaintext),
             plaintext.len(),
             ct.as_mut_ptr(),
             tag.as_mut_ptr(),
         )
     };
     check(rc)?;
-    Ok(GcmSealed { ciphertext: ct, tag })
+    Ok(GcmSealed {
+        ciphertext: ct,
+        tag,
+    })
 }
 
 /// \brief AES-256-GCM decrypt and verify.
@@ -94,9 +98,9 @@ pub fn aes_gcm_decrypt(
         host_aes_gcm_decrypt(
             key.as_ptr(),
             iv.as_ptr(),
-            aad.as_ptr(),
+            crate::slice_ptr(aad),
             aad.len(),
-            ciphertext.as_ptr(),
+            crate::slice_ptr(ciphertext),
             ciphertext.len(),
             tag.as_ptr(),
             pt.as_mut_ptr(),
@@ -114,7 +118,12 @@ fn encode_with(
     let mut buf = Vec::<u8>::with_capacity(out_size);
     let rc = unsafe {
         buf.set_len(out_size);
-        f(data.as_ptr(), data.len(), buf.as_mut_ptr() as *mut c_char, out_size)
+        f(
+            crate::slice_ptr(data),
+            data.len(),
+            buf.as_mut_ptr() as *mut c_char,
+            out_size,
+        )
     };
     check(rc)?;
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
@@ -173,16 +182,59 @@ pub fn hex_decode(text: &str) -> Result<Vec<u8>> {
 #[link(wasm_import_module = "cdc")]
 extern "C" {
     fn host_sha256(data: *const u8, len: usize, out: *mut u8) -> c_int;
-    fn host_hmac_sha256(key: *const u8, klen: usize, data: *const u8, dlen: usize,
-                        out: *mut u8) -> c_int;
-    fn host_aes_gcm_encrypt(key: *const u8, iv: *const u8, aad: *const u8, aad_len: usize,
-                            pt: *const u8, pt_len: usize, ct: *mut u8, tag: *mut u8) -> c_int;
-    fn host_aes_gcm_decrypt(key: *const u8, iv: *const u8, aad: *const u8, aad_len: usize,
-                            ct: *const u8, ct_len: usize, tag: *const u8, pt: *mut u8) -> c_int;
-    fn host_base32_encode(input: *const u8, in_len: usize, out: *mut c_char, out_size: usize) -> c_int;
-    fn host_base32_decode(input: *const c_char, in_len: usize, out: *mut u8, out_size: usize) -> c_int;
-    fn host_base64_encode(input: *const u8, in_len: usize, out: *mut c_char, out_size: usize) -> c_int;
-    fn host_base64_decode(input: *const c_char, in_len: usize, out: *mut u8, out_size: usize) -> c_int;
-    fn host_hex_encode(input: *const u8, in_len: usize, out: *mut c_char, out_size: usize) -> c_int;
-    fn host_hex_decode(input: *const c_char, in_len: usize, out: *mut u8, out_size: usize) -> c_int;
+    fn host_hmac_sha256(
+        key: *const u8,
+        klen: usize,
+        data: *const u8,
+        dlen: usize,
+        out: *mut u8,
+    ) -> c_int;
+    fn host_aes_gcm_encrypt(
+        key: *const u8,
+        iv: *const u8,
+        aad: *const u8,
+        aad_len: usize,
+        pt: *const u8,
+        pt_len: usize,
+        ct: *mut u8,
+        tag: *mut u8,
+    ) -> c_int;
+    fn host_aes_gcm_decrypt(
+        key: *const u8,
+        iv: *const u8,
+        aad: *const u8,
+        aad_len: usize,
+        ct: *const u8,
+        ct_len: usize,
+        tag: *const u8,
+        pt: *mut u8,
+    ) -> c_int;
+    fn host_base32_encode(
+        input: *const u8,
+        in_len: usize,
+        out: *mut c_char,
+        out_size: usize,
+    ) -> c_int;
+    fn host_base32_decode(
+        input: *const c_char,
+        in_len: usize,
+        out: *mut u8,
+        out_size: usize,
+    ) -> c_int;
+    fn host_base64_encode(
+        input: *const u8,
+        in_len: usize,
+        out: *mut c_char,
+        out_size: usize,
+    ) -> c_int;
+    fn host_base64_decode(
+        input: *const c_char,
+        in_len: usize,
+        out: *mut u8,
+        out_size: usize,
+    ) -> c_int;
+    fn host_hex_encode(input: *const u8, in_len: usize, out: *mut c_char, out_size: usize)
+        -> c_int;
+    fn host_hex_decode(input: *const c_char, in_len: usize, out: *mut u8, out_size: usize)
+        -> c_int;
 }

@@ -13,8 +13,12 @@ members = [
     "plugins/home_assistant",
     "plugins/matrix",
     "plugins/grove_led",
+    "plugins/name_badge",
     "plugins/sdk_probe",
+    "plugins/snake",
     "plugins/ble_scanner",
+    "plugins/thermo_printer",
+    "plugins/webserver",
 ]
 exclude = [
     "sdk/plugin_template_rust",

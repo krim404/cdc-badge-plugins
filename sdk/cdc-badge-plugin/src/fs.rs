@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 /// \return `Ok(())` on success, `Err` on failure.
 pub fn write(name: &str, data: &[u8]) -> Result<()> {
     let n = CString::new(name).map_err(|_| Error::InvalidArg)?;
-    check(unsafe { ffi::host_fs_write(n.as_ptr(), data.as_ptr(), data.len()) })
+    check(unsafe { ffi::host_fs_write(n.as_ptr(), crate::slice_ptr(data), data.len()) })
 }
 
 /// \brief Create or overwrite a file with UTF-8 text.

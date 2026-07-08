@@ -52,7 +52,7 @@ impl Request {
     ///             automatically by the host.
     /// \return `Ok(())` on success, `Err` on failure.
     pub fn body(&self, body: &[u8]) -> Result<()> {
-        check(unsafe { host_http_set_body(self.handle, body.as_ptr(), body.len()) })
+        check(unsafe { host_http_set_body(self.handle, crate::slice_ptr(body), body.len()) })
     }
 
     /// \brief Send the request and read the response status.
