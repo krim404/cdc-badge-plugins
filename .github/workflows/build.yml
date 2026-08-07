@@ -33,7 +33,7 @@ jobs:
           sudo cp "binaryen-${BINARYEN_VERSION}/bin/wasm-opt" /usr/local/bin/
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
