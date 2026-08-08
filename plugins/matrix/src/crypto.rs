@@ -122,15 +122,13 @@ pub fn ssss_decrypt_backup_key(
     use ctr::cipher::{KeyIvInit, StreamCipher};
 
     let okm = hkdf_sha256_64(ssss_key, &[0u8; 32], b"m.megolm_backup.v1")?;
-    let aes_key = &okm[..32];
+    let aes_key: &[u8; 32] = okm[..32].try_into().ok()?;
     let mac_key = &okm[32..];
 
     let mut ct = base64_decode(ciphertext_b64).ok()?;
     let iv = base64_decode(iv_b64).ok()?;
     let expected_mac = base64_decode(mac_b64).ok()?;
-    if iv.len() != 16 {
-        return None;
-    }
+    let iv: &[u8; 16] = iv.as_slice().try_into().ok()?;
 
     // Encrypt-then-MAC: the MAC covers the ciphertext bytes.
     let mac = hmac_sha256(mac_key, &ct).ok()?;
@@ -138,7 +136,7 @@ pub fn ssss_decrypt_backup_key(
         return None;
     }
 
-    let mut cipher = ctr::Ctr128BE::<Aes256>::new(aes_key.into(), iv.as_slice().into());
+    let mut cipher = ctr::Ctr128BE::<Aes256>::new(aes_key.into(), iv.into());
     cipher.apply_keystream(&mut ct);
 
     // Plaintext is the base64 of the 32-byte backup private key.
@@ -558,6 +556,49 @@ mod tests {
         encoded[last] = if encoded[last] == b'A' { b'B' } else { b'A' };
         let s = String::from_utf8(encoded).unwrap();
         assert_eq!(parse_recovery_key(&s), None);
+    }
+
+    // Vector generated independently (Python `cryptography`): HKDF-SHA256 over
+    // a 32-zero-byte salt with info "m.megolm_backup.v1", AES-256-CTR with a
+    // big-endian 128-bit counter, HMAC-SHA256 over the ciphertext. The IV's low
+    // 64 bits are all-ones so the counter carries into the high half within the
+    // three ciphertext blocks; that pins the counter width, not just the key.
+    const SSSS_CT_B64: &str = "5Vx13c0QmSpCfD2XrG3dVg1Sa9y1jqd6NQhgcrvUb7zfsGQoBYM1xCF6NvY=";
+    const SSSS_IV_B64: &str = "EBESExQVFhf//////////w==";
+    const SSSS_MAC_B64: &str = "7Lm0znsmS5B5B2rdDs462abWh9TqhWwTbp0m/buoyrk=";
+
+    fn ssss_test_key() -> [u8; 32] {
+        let mut key = [0u8; 32];
+        for (i, b) in key.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+        key
+    }
+
+    #[test]
+    fn ssss_decrypt_recovers_known_backup_key() {
+        let expected = [
+            0x0f, 0x61, 0x9a, 0x27, 0xcf, 0xf6, 0xe9, 0x5a, 0xe6, 0x84, 0x59, 0xba, 0x30, 0xc2,
+            0x6b, 0x05, 0xa0, 0x8b, 0x0d, 0x5c, 0xad, 0x66, 0xb7, 0x66, 0x14, 0x69, 0x6b, 0xb4,
+            0x01, 0x44, 0x98, 0xa9,
+        ];
+        assert_eq!(
+            ssss_decrypt_backup_key(&ssss_test_key(), SSSS_CT_B64, SSSS_IV_B64, SSSS_MAC_B64),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn ssss_decrypt_rejects_tampered_ciphertext() {
+        use cdc_badge_plugin::crypto::{base64_decode, base64_encode};
+
+        let mut ct = base64_decode(SSSS_CT_B64).unwrap();
+        ct[0] ^= 0x01;
+        let tampered = base64_encode(&ct).unwrap();
+        assert_eq!(
+            ssss_decrypt_backup_key(&ssss_test_key(), &tampered, SSSS_IV_B64, SSSS_MAC_B64),
+            None
+        );
     }
 
     #[test]

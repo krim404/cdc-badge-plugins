@@ -34,6 +34,9 @@ mod ui_views;
 #[cfg(target_arch = "wasm32")]
 mod getrandom_shim;
 
+#[cfg(test)]
+mod host_test_stubs;
+
 use actions::*;
 use model::{Room, Session, RETAIN};
 

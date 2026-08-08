@@ -20,11 +20,21 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 # the PK *encryption* primitive; decrypting an existing backup is the standard use.
 vodozemac  = { version = "0.10.0", features = ["insecure-pk-encryption"] }
 # AES-256-CTR for the SSSS (secret storage) unwrap of the key-backup private
-# key; the host AES binding is GCM-only. Versions match vodozemac's tree.
-aes        = "0.8"
-ctr        = "0.9"
+# key; the host AES binding is GCM-only.
+aes        = "0.9"
+ctr        = "0.10"
+
+# Native test builds link stand-ins for the `host_*` crypto imports
+# (see src/host_test_stubs.rs).
+[dev-dependencies]
+base64 = "0.22"
+hmac   = "0.12"
+sha2   = "0.10"
 
 # Only the wasm build needs the custom getrandom backend wired to the host RNG;
 # native test builds use the OS backend that vodozemac's getrandom picks itself.
+# The major must stay the one vodozemac resolves (0.2 via rand_core 0.6): the
+# backend is registered per major, so a mismatch leaves vodozemac's getrandom
+# without an entropy source on wasm32.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["custom"] }
