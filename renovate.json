@@ -5,11 +5,14 @@
   ],
   "packageRules": [
     {
-      "description": "getrandom must track the major vodozemac resolves (0.2 via rand_core 0.6); the wasm custom backend is registered per major and a mismatch leaves vodozemac without entropy.",
-      "matchManagers": ["cargo"],
-      "matchPackageNames": ["getrandom"],
-      "matchUpdateTypes": ["major"],
-      "enabled": false
+      "description": "This repository is mirrored to several forges. An unattended merge on one of them makes the others diverge, so updates are merged by hand and pushed to every mirror.",
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": false
     }
   ]
 }
