@@ -28,7 +28,7 @@ ctr        = "0.10"
 # (see src/host_test_stubs.rs).
 [dev-dependencies]
 base64 = "0.23"
-hmac   = "0.12"
+hmac   = "0.13"
 sha2   = "0.11"
 
 # Only the wasm build needs the custom getrandom backend wired to the host RNG;
