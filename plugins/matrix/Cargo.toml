@@ -27,7 +27,7 @@ ctr        = "0.10"
 # Native test builds link stand-ins for the `host_*` crypto imports
 # (see src/host_test_stubs.rs).
 [dev-dependencies]
-base64 = "0.22"
+base64 = "0.23"
 hmac   = "0.12"
 sha2   = "0.10"
 
