@@ -18,7 +18,7 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 # `insecure-pk-encryption` gates PkDecryption, needed to read the Megolm key
 # backup (m.megolm_backup.v1.curve25519-aes-sha2). The "insecure" label is about
 # the PK *encryption* primitive; decrypting an existing backup is the standard use.
-vodozemac  = { version = "0.10.0", features = ["insecure-pk-encryption"] }
+vodozemac  = { version = "0.11.0", features = ["insecure-pk-encryption"] }
 # AES-256-CTR for the SSSS (secret storage) unwrap of the key-backup private
 # key; the host AES binding is GCM-only.
 aes        = "0.9"
