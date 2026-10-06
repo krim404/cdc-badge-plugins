@@ -7,7 +7,7 @@
 //! success, a negative code on failure, and NUL-terminate encoder output.
 
 use base64::Engine as _;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use std::os::raw::{c_char, c_int};
 
