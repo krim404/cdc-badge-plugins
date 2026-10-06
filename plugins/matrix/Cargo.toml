@@ -33,8 +33,8 @@ sha2   = "0.11"
 
 # Only the wasm build needs the custom getrandom backend wired to the host RNG;
 # native test builds use the OS backend that vodozemac's getrandom picks itself.
-# The major must stay the one vodozemac resolves (0.2 via rand_core 0.6): the
+# The major must stay the one vodozemac resolves (0.4 via rand_core 0.10): the
 # backend is registered per major, so a mismatch leaves vodozemac's getrandom
 # without an entropy source on wasm32.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", features = ["custom"] }
+getrandom = "0.4"
