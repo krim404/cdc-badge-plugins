@@ -78,11 +78,14 @@ impl Sprite {
 
     /// \brief Create a sprite by slicing a surface into a row-major grid of
     ///        `w x h` cells (compose frames with surface drawing first).
-    pub fn from_surface(surface: &crate::surface::Surface, w: u16, h: u16,
-                        frame_count: u16) -> Result<Sprite> {
-        let rc = unsafe {
-            ffi::host_sprite_create_from_surface(surface.handle(), w, h, frame_count)
-        };
+    pub fn from_surface(
+        surface: &crate::surface::Surface,
+        w: u16,
+        h: u16,
+        frame_count: u16,
+    ) -> Result<Sprite> {
+        let rc =
+            unsafe { ffi::host_sprite_create_from_surface(surface.handle(), w, h, frame_count) };
         if rc <= 0 {
             return Err(Error::from_code(rc));
         }
@@ -157,8 +160,7 @@ impl Sprite {
     /// `repeat` counts extra cycles ([`REPEAT_FOREVER`] = endless); a
     /// finished finite playback fires
     /// `plugin_on_action(done_action_id, handle, final_frame)`.
-    pub fn play(&self, mode: Mode, frame_ms: u16, repeat: u16,
-                done_action_id: u32) -> Result<()> {
+    pub fn play(&self, mode: Mode, frame_ms: u16, repeat: u16, done_action_id: u32) -> Result<()> {
         check(unsafe {
             ffi::host_sprite_play(self.handle, mode.raw(), frame_ms, repeat, done_action_id)
         })
@@ -189,7 +191,14 @@ pub fn spinner() -> Result<Sprite> {
     // One orbit position per frame, 45 deg steps on a ring of radius 6
     // around (8, 8), dot radius 2, plus a faint ring of 8 anchor dots.
     const POS: [(i16, i16); 8] = [
-        (8, 2), (12, 4), (14, 8), (12, 12), (8, 14), (4, 12), (2, 8), (4, 4),
+        (8, 2),
+        (12, 4),
+        (14, 8),
+        (12, 12),
+        (8, 14),
+        (4, 12),
+        (2, 8),
+        (4, 4),
     ];
     let mut sheet = [0u8; 2 * 16 * 8];
     for (f, &(cx, cy)) in POS.iter().enumerate() {

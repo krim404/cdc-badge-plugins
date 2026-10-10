@@ -7,8 +7,14 @@
 //! a set bit is black.
 
 use crate::{check, Error, Result};
+use alloc::vec;
 use alloc::vec::Vec;
 use core::ffi::c_int;
+
+/// Host limit for `target_w`.
+pub const MAX_TARGET_W: u16 = 1024;
+/// Largest 1-bpp output accepted (1024 px wide by 4096 px tall).
+pub const MAX_OUTPUT_BYTES: usize = (MAX_TARGET_W as usize / 8) * 4096;
 
 /// \brief A decoded, dithered 1-bpp raster.
 pub struct MonoImage {
@@ -32,27 +38,32 @@ pub fn info(data: &[u8]) -> Option<(u16, u16)> {
 
 /// \brief Decode, scale to `target_w` (aspect preserved) and dither to 1-bpp.
 /// \param target_w Output width in pixels, 1..1024 (e.g. 384 for thermal print).
+/// \return `Err(InvalidArg)` when the scaled output would exceed
+///         [`MAX_OUTPUT_BYTES`].
 pub fn render(data: &[u8], target_w: u16) -> Result<MonoImage> {
     let (w, h) = info(data).ok_or(Error::Generic)?;
-    if w == 0 || h == 0 || target_w == 0 {
+    if w == 0 || h == 0 || target_w == 0 || target_w > MAX_TARGET_W {
         return Err(Error::InvalidArg);
     }
     // Round-to-nearest height estimate plus one spare row: if the host ceils
     // instead, the buffer would otherwise be one row short (spurious NO_MEMORY).
     let target_h = ((h as u32 * target_w as u32 + w as u32 / 2) / w as u32).max(1) as usize + 1;
     let stride = (target_w as usize).div_ceil(8);
-    let mut buf = Vec::<u8>::with_capacity(stride * target_h);
+    let buf_len = stride
+        .checked_mul(target_h)
+        .filter(|&n| n <= MAX_OUTPUT_BYTES)
+        .ok_or(Error::InvalidArg)?;
+    let mut buf = vec![0u8; buf_len];
 
     let mut stride_out: u16 = 0;
     let mut height_out: u16 = 0;
     let rc = unsafe {
-        buf.set_len(stride * target_h);
         host_image_render(
             crate::slice_ptr(data),
             data.len(),
             target_w,
             buf.as_mut_ptr(),
-            stride * target_h,
+            buf_len,
             &mut stride_out,
             &mut height_out,
         )

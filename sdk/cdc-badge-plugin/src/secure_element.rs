@@ -8,6 +8,7 @@
 
 use crate::{check, Error, Result};
 use alloc::ffi::CString;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_int};
 
@@ -58,18 +59,19 @@ pub fn import(name: &str, priv_key: &[u8], curve: Curve) -> Result<()> {
     check(unsafe { host_ecc_import(c.as_ptr(), priv_key.as_ptr(), curve.as_u8()) })
 }
 
+/// Largest raw public key the host writes (P-256 X||Y); the host sizes the
+/// write by the stored key, not by `curve`.
+const PUBKEY_BUF_LEN: usize = 64;
+
 /// \brief Export the public key for `name`.
 /// \param name  Key name declared in `capabilities.ecc`.
 /// \param curve Curve of the stored key (selects the output length).
 /// \return The raw public key, or `Err` on failure.
 pub fn pubkey(name: &str, curve: Curve) -> Result<Vec<u8>> {
     let c = CString::new(name).map_err(|_| Error::InvalidArg)?;
-    let mut buf = Vec::<u8>::with_capacity(curve.pubkey_len());
-    let r = unsafe {
-        buf.set_len(curve.pubkey_len());
-        host_ecc_pubkey(c.as_ptr(), buf.as_mut_ptr(), curve.as_u8())
-    };
-    check(r)?;
+    let mut buf = vec![0u8; PUBKEY_BUF_LEN];
+    check(unsafe { host_ecc_pubkey(c.as_ptr(), buf.as_mut_ptr(), curve.as_u8()) })?;
+    buf.truncate(curve.pubkey_len());
     Ok(buf)
 }
 
@@ -107,17 +109,16 @@ pub fn eddsa_sign(name: &str, msg: &[u8]) -> Result<[u8; 64]> {
     Ok(sig)
 }
 
+/// Bytes the host writes for the chip identity (`ser_num`); it reports no count.
+const CHIP_ID_LEN: usize = 16;
+
 /// \brief Read the TROPIC01 chip serial / identity blob.
-/// \param max Capacity to request from the chip.
+/// \param max Capacity to request from the chip; clamped to 16 bytes.
 /// \return The identity bytes, or `Err` on failure.
 pub fn chip_id(max: usize) -> Result<Vec<u8>> {
-    let mut buf = Vec::<u8>::with_capacity(max);
-    let mut len = max;
-    let r = unsafe {
-        buf.set_len(max);
-        host_se_chip_id(buf.as_mut_ptr(), &mut len)
-    };
-    check(r)?;
+    let mut len = max.min(CHIP_ID_LEN);
+    let mut buf = vec![0u8; len];
+    check(unsafe { host_se_chip_id(buf.as_mut_ptr(), &mut len) })?;
     Ok(buf)
 }
 

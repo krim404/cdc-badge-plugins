@@ -74,9 +74,9 @@ pub fn write(pin: u8, level: bool) -> Result<()> {
 /// \return `Ok(true)` if the pin reads high, `Ok(false)` if low,
 ///         `Err` on failure.
 pub fn read(pin: u8) -> Result<bool> {
-    let mut level = false;
+    let mut level: i32 = 0;
     check(unsafe { ffi_gpio::host_gpio_read(pin, &mut level) })?;
-    Ok(level)
+    Ok(level != 0)
 }
 
 /// \brief Release the pin so other capabilities (e.g. SAO, Grove) can
@@ -139,7 +139,7 @@ mod ffi_gpio {
         pub fn host_gpio_set_direction(pin: u8, direction: u8) -> c_int;
         pub fn host_gpio_set_pull(pin: u8, pull: u8) -> c_int;
         pub fn host_gpio_write(pin: u8, level: bool) -> c_int;
-        pub fn host_gpio_read(pin: u8, level: *mut bool) -> c_int;
+        pub fn host_gpio_read(pin: u8, level: *mut i32) -> c_int;
         pub fn host_gpio_release(pin: u8) -> c_int;
 
         pub fn host_gpio_pwm_start(pin: u8, freq_hz: u32, duty_per_mille: u16) -> c_int;

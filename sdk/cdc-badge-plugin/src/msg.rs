@@ -17,6 +17,7 @@
 use crate::{check, Error, Result};
 use alloc::ffi::CString;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_int};
 
@@ -53,15 +54,15 @@ pub fn unregister_handler(mime_type: &str) -> Result<()> {
 }
 
 /// \brief Pull the payload delivered by the most recent inbound message action.
-/// \param max_len Maximum payload bytes to read.
-/// \return The received message, or `None` when nothing is pending.
+/// \param max_len Maximum payload bytes to read; a longer payload is cut.
+/// \return The received message, or `None` on a host error. Outside a message
+///         action the host reports an empty payload, which is returned as a
+///         `Received` with empty `data`.
 pub fn consume(max_len: usize) -> Option<Received> {
     let cap = max_len.saturating_add(1);
-    let mut buf = Vec::<u8>::with_capacity(cap);
-    let mut mime = Vec::<u8>::with_capacity(MIME_MAX);
+    let mut buf = vec![0u8; cap];
+    let mut mime = vec![0u8; MIME_MAX];
     let n = unsafe {
-        buf.set_len(cap);
-        mime.set_len(MIME_MAX);
         host_msg_consume(
             buf.as_mut_ptr(),
             cap,

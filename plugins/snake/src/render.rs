@@ -85,10 +85,7 @@ impl Layout {
     /// A cell's pixel position as an offset from the field origin - the
     /// coordinate space the head/food elements are tweened/offset in.
     fn cell_offset(&self, cell: (u8, u8)) -> (i16, i16) {
-        (
-            cell.0 as i16 * sprites::CELL,
-            cell.1 as i16 * sprites::CELL,
-        )
+        (cell.0 as i16 * sprites::CELL, cell.1 as i16 * sprites::CELL)
     }
 }
 
@@ -262,9 +259,7 @@ fn head_flags(dir: Direction) -> u8 {
             Direction::East => 0,
             Direction::South => sprite::FLAG_ROT_90,
             Direction::West => sprite::FLAG_FLIP_H | sprite::FLAG_FLIP_V,
-            Direction::North => {
-                sprite::FLAG_ROT_90 | sprite::FLAG_FLIP_H | sprite::FLAG_FLIP_V
-            }
+            Direction::North => sprite::FLAG_ROT_90 | sprite::FLAG_FLIP_H | sprite::FLAG_FLIP_V,
         }
 }
 

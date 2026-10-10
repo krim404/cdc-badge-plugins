@@ -33,8 +33,15 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
+      # matrix is a std crate (vodozemac); building it together with the
+      # no_std plugins leaks std into them (duplicate panic_impl), so it gets
+      # its own invocation, as in tools/build_all.sh.
       - name: cargo clippy
-        run: cargo clippy --lib --target wasm32-unknown-unknown -- -D warnings
+        run: |
+          cargo clippy --lib --workspace --exclude matrix --target wasm32-unknown-unknown -- -D warnings
+          cargo clippy --lib -p matrix --target wasm32-unknown-unknown -- -D warnings
 
       - name: cargo build
-        run: cargo build --release --target wasm32-unknown-unknown
+        run: |
+          cargo build --release --workspace --exclude matrix --target wasm32-unknown-unknown
+          cargo build --release -p matrix --target wasm32-unknown-unknown

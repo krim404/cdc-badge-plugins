@@ -159,7 +159,7 @@ pub fn base32_decode(text: &str) -> Result<Vec<u8>> {
     decode_with(text, text.len(), host_base32_decode)
 }
 
-/// \brief Base64-encode `data` (standard alphabet with padding).
+/// \brief Base64-encode `data` (standard alphabet, no `=` padding).
 pub fn base64_encode(data: &[u8]) -> Result<String> {
     encode_with(data, data.len().div_ceil(3) * 4 + 1, host_base64_encode)
 }

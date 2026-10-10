@@ -89,7 +89,7 @@ static mut STATE: State = State::defaults();
 
 #[inline]
 fn s() -> &'static mut State {
-    unsafe { &mut *(&raw mut STATE) }
+    unsafe { &mut *core::ptr::addr_of_mut!(STATE) }
 }
 
 // --- Formatting -----------------------------------------------------------
@@ -107,7 +107,11 @@ fn mac_full(addr: &[u8; 6]) -> String {
 
 /// \brief Build a row label: name/MAC left, RSSI and `xN` flush right.
 fn make_label(d: &Device) -> String {
-    let raw = if d.name.is_empty() { mac_short(&d.addr) } else { d.name.clone() };
+    let raw = if d.name.is_empty() {
+        mac_short(&d.addr)
+    } else {
+        d.name.clone()
+    };
     let right = format!("{:>4} dBm  x{}", d.rssi, d.count);
     let name_w = LABEL_W.saturating_sub(right.chars().count() + 1);
     let name: String = raw.chars().take(name_w).collect();
@@ -184,7 +188,11 @@ fn evict_one() {
 fn build_desired() -> Vec<Row> {
     s().devices
         .iter()
-        .map(|d| Row { addr: d.addr, label: make_label(d), icon: icon_for(d) })
+        .map(|d| Row {
+            addr: d.addr,
+            label: make_label(d),
+            icon: icon_for(d),
+        })
         .collect()
 }
 
@@ -269,27 +277,46 @@ fn fmt_ts(t: &time::LocalTime) -> String {
 fn save_results() {
     let end = match time::local_time() {
         Some(t) => t,
-        None => return,  // no RTC -> no meaningful filename / timestamps
+        None => return, // no RTC -> no meaningful filename / timestamps
     };
     if s().devices.is_empty() {
         return;
     }
 
-    let fname = format!("{:02}{:02}-{:02}{:02}.txt", end.day, end.month, end.hour, end.minute);
+    let fname = format!(
+        "{:02}{:02}-{:02}{:02}.txt",
+        end.day, end.month, end.hour, end.minute
+    );
 
-    let start = s().start.map(|t| fmt_ts(&t)).unwrap_or_else(|| String::from("?"));
+    let start = s()
+        .start
+        .map(|t| fmt_ts(&t))
+        .unwrap_or_else(|| String::from("?"));
     let mut out = String::new();
     out.push_str(&format!("Start: {}\n", start));
     out.push_str(&format!("End:   {}\n", fmt_ts(&end)));
     out.push_str(&format!("Devices: {}\n\n", s().devices.len()));
     for d in &s().devices {
-        let name = if d.name.is_empty() { "" } else { d.name.as_str() };
-        out.push_str(&format!("{} {:>4}dBm x{} {}\n", mac_full(&d.addr), d.rssi, d.count, name));
+        let name = if d.name.is_empty() {
+            ""
+        } else {
+            d.name.as_str()
+        };
+        out.push_str(&format!(
+            "{} {:>4}dBm x{} {}\n",
+            mac_full(&d.addr),
+            d.rssi,
+            d.count,
+            name
+        ));
     }
 
     if fs::write_str(&fname, &out).is_ok() {
-        ui::push_toast(format!("{} {}", i18n::tr_core("core.saved"), fname),
-                       ui::UI_ICON_SUCCESS, 2500);
+        ui::push_toast(
+            format!("{} {}", i18n::tr_core("core.saved"), fname),
+            ui::UI_ICON_SUCCESS,
+            2500,
+        );
     }
 }
 
@@ -372,11 +399,11 @@ pub extern "C" fn plugin_on_tick(uptime_ms: u64) -> i32 {
                 render();
             }
         }
-    } else if uptime_ms.saturating_sub(s().last_scan_ms) >= RESCAN_INTERVAL_MS {
-        if ble::scan_start(SCAN_MS).is_ok() {
-            s().scanning = true;
-            s().last_poll_ms = uptime_ms;
-        }
+    } else if uptime_ms.saturating_sub(s().last_scan_ms) >= RESCAN_INTERVAL_MS
+        && ble::scan_start(SCAN_MS).is_ok()
+    {
+        s().scanning = true;
+        s().last_poll_ms = uptime_ms;
     }
     0
 }

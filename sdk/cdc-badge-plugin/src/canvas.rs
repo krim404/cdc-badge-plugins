@@ -370,12 +370,17 @@ pub fn set_ink_white(white: bool) -> Result<()> {
 ///        scrolls seamlessly through the text (rendered once with the
 ///        current font/size). Returns the backing sprite handle
 ///        ([`crate::sprite::Sprite::from_handle`] to stop/destroy it).
-pub fn marquee(x: i16, y: i16, window_w: i16, text: &str, step_px: u16,
-               frame_ms: u16) -> Result<u32> {
+pub fn marquee(
+    x: i16,
+    y: i16,
+    window_w: i16,
+    text: &str,
+    step_px: u16,
+    frame_ms: u16,
+) -> Result<u32> {
     let c = CString::new(text).unwrap_or_default();
-    let rc = unsafe {
-        ffi::host_view_canvas_marquee(x, y, window_w, c.as_ptr(), step_px, frame_ms)
-    };
+    let rc =
+        unsafe { ffi::host_view_canvas_marquee(x, y, window_w, c.as_ptr(), step_px, frame_ms) };
     if rc <= 0 {
         return Err(crate::Error::from_code(rc));
     }

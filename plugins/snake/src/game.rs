@@ -84,6 +84,7 @@ impl XorShift32 {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> u32 {
         let mut x = self.state;
         x ^= x << 13;
@@ -125,9 +126,7 @@ impl Game {
         }
 
         let (cx, cy) = (w / 2, h / 2);
-        let snake: VecDeque<(u8, u8)> = (0..START_LENGTH)
-            .map(|i| (cx - i as u8, cy))
-            .collect();
+        let snake: VecDeque<(u8, u8)> = (0..START_LENGTH).map(|i| (cx - i as u8, cy)).collect();
 
         let mut game = Game {
             w,
@@ -239,7 +238,7 @@ impl Game {
         let hits_body = self
             .snake
             .iter()
-            .any(|&c| c == new_head && !(Some(c) == tail && !eats));
+            .any(|&c| c == new_head && (eats || Some(c) != tail));
         if hits_body {
             self.alive = false;
             return StepOutcome::Crashed;
@@ -463,15 +462,7 @@ mod tests {
         // that is NOT the tail, so it must crash.
         //   (2,2)h (3,2) (4,2)
         //   (2,3)  (3,3) (4,3)   tail = (1,3)
-        let body = [
-            (2, 2),
-            (3, 2),
-            (4, 2),
-            (4, 3),
-            (3, 3),
-            (2, 3),
-            (1, 3),
-        ];
+        let body = [(2, 2), (3, 2), (4, 2), (4, 3), (3, 3), (2, 3), (1, 3)];
         let mut g = Game::for_test(W, H, &body, Direction::West, Some((9, 1)));
         g.steer(Direction::South);
         assert_eq!(g.step(), StepOutcome::Crashed);
@@ -533,7 +524,8 @@ mod tests {
         }
         body.reverse(); // head-first: head = (7,2)
         for seed in [1u32, 2, 3, 42, 0xDEAD_BEEF] {
-            let mut g = Game::for_test(MIN_GRID_W, MIN_GRID_H, &body, Direction::East, Some((7, 3)));
+            let mut g =
+                Game::for_test(MIN_GRID_W, MIN_GRID_H, &body, Direction::East, Some((7, 3)));
             g.rng = XorShift32::new(seed);
             g.steer(Direction::South);
             assert_eq!(g.step(), StepOutcome::Ate);

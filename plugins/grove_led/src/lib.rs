@@ -28,34 +28,34 @@ const FRAME_INTERVAL_MS: u64 = 20;
 // EventType ordinals as seen by plugin_on_action when our event subscription
 // fires. Match cdc::core::EventType in the firmware.
 const ET_SYSTEM_SLEEP: u32 = 10;
-const ET_SYSTEM_WAKE:  u32 = 11;
+const ET_SYSTEM_WAKE: u32 = 11;
 
 const NVS_ENABLED: &str = "enabled";
-const NVS_COUNT:   &str = "count";
-const NVS_BRIGHT:  &str = "bright";
-const NVS_R:       &str = "color_r";
-const NVS_G:       &str = "color_g";
-const NVS_B:       &str = "color_b";
-const NVS_EFFECT:  &str = "effect";
-const NVS_SPEED:   &str = "speed";
+const NVS_COUNT: &str = "count";
+const NVS_BRIGHT: &str = "bright";
+const NVS_R: &str = "color_r";
+const NVS_G: &str = "color_g";
+const NVS_B: &str = "color_b";
+const NVS_EFFECT: &str = "effect";
+const NVS_SPEED: &str = "speed";
 
 const DEFAULT_SPEED: u8 = 50;
 
-const ACT_TOP_SELECT: u32     = 1;
-const ACT_COUNT_SAVE: u32     = 2;
-const ACT_BRIGHT_SAVE: u32    = 3;
-const ACT_COLOR_SAVE: u32     = 4;
-const ACT_SPEED_SAVE: u32     = 5;
-const ACT_EFFECT_SELECT: u32  = 7;
-const ACT_EVENT: u32          = 8;
-const ACT_LOCK_TOGGLE: u32    = 9;
+const ACT_TOP_SELECT: u32 = 1;
+const ACT_COUNT_SAVE: u32 = 2;
+const ACT_BRIGHT_SAVE: u32 = 3;
+const ACT_COLOR_SAVE: u32 = 4;
+const ACT_SPEED_SAVE: u32 = 5;
+const ACT_EFFECT_SELECT: u32 = 7;
+const ACT_EVENT: u32 = 8;
+const ACT_LOCK_TOGGLE: u32 = 9;
 
 const ITEM_TOGGLE: u32 = 0;
-const ITEM_COUNT:  u32 = 1;
+const ITEM_COUNT: u32 = 1;
 const ITEM_BRIGHT: u32 = 2;
-const ITEM_COLOR:  u32 = 3;
+const ITEM_COLOR: u32 = 3;
 const ITEM_EFFECT: u32 = 4;
-const ITEM_SPEED:  u32 = 5;
+const ITEM_SPEED: u32 = 5;
 
 /// \brief Selectable LED animation modes. Stored as `u8` in NVS.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -106,7 +106,9 @@ impl State {
             enabled: false,
             count: DEFAULT_COUNT,
             brightness: DEFAULT_BRIGHT,
-            r: 255, g: 255, b: 255,
+            r: 255,
+            g: 255,
+            b: 255,
             effect: Effect::Rainbow,
             speed: DEFAULT_SPEED,
             rainbow_offset: 0,
@@ -121,8 +123,8 @@ impl State {
 
 fn dim_dither(target_high_res: u16, acc: &mut u8) -> u8 {
     let target_lo = (target_high_res >> 8) as u8;
-    let frac = (target_high_res & 0xFF) as u16;
-    let (sum, overflow) = (*acc as u16).overflowing_add(frac as u16);
+    let frac = target_high_res & 0xFF;
+    let (sum, overflow) = (*acc as u16).overflowing_add(frac);
     if overflow || sum >= 256 {
         *acc = (sum & 0xFF) as u8;
         target_lo.saturating_add(1)
@@ -137,19 +139,37 @@ fn dim_dither(target_high_res: u16, acc: &mut u8) -> u8 {
 static mut STATE: State = State::defaults();
 
 #[inline]
-fn s() -> &'static mut State { unsafe { &mut *(&raw mut STATE) } }
+fn s() -> &'static mut State {
+    unsafe { &mut *core::ptr::addr_of_mut!(STATE) }
+}
 
 // --- NVS ------------------------------------------------------------------
 
 fn load_state() {
-    if let Some(v) = nvs::get_u32(NVS_ENABLED) { s().enabled = v != 0; }
-    if let Some(v) = nvs::get_u32(NVS_COUNT)   { s().count = clamp_count(v as u8); }
-    if let Some(v) = nvs::get_u32(NVS_BRIGHT)  { s().brightness = v as u8; }
-    if let Some(v) = nvs::get_u32(NVS_R)       { s().r = v as u8; }
-    if let Some(v) = nvs::get_u32(NVS_G)       { s().g = v as u8; }
-    if let Some(v) = nvs::get_u32(NVS_B)       { s().b = v as u8; }
-    if let Some(v) = nvs::get_u32(NVS_EFFECT)  { s().effect = Effect::from_u8(v as u8); }
-    if let Some(v) = nvs::get_u32(NVS_SPEED)   { s().speed = (v as u8).clamp(1, 100); }
+    if let Some(v) = nvs::get_u32(NVS_ENABLED) {
+        s().enabled = v != 0;
+    }
+    if let Some(v) = nvs::get_u32(NVS_COUNT) {
+        s().count = clamp_count(v as u8);
+    }
+    if let Some(v) = nvs::get_u32(NVS_BRIGHT) {
+        s().brightness = v as u8;
+    }
+    if let Some(v) = nvs::get_u32(NVS_R) {
+        s().r = v as u8;
+    }
+    if let Some(v) = nvs::get_u32(NVS_G) {
+        s().g = v as u8;
+    }
+    if let Some(v) = nvs::get_u32(NVS_B) {
+        s().b = v as u8;
+    }
+    if let Some(v) = nvs::get_u32(NVS_EFFECT) {
+        s().effect = Effect::from_u8(v as u8);
+    }
+    if let Some(v) = nvs::get_u32(NVS_SPEED) {
+        s().speed = (v as u8).clamp(1, 100);
+    }
 }
 
 /// \brief Hold a light-sleep inhibitor only while an animated effect runs with
@@ -184,7 +204,13 @@ fn xorshift64(state: &mut u64) -> u64 {
 }
 
 fn clamp_count(v: u8) -> u8 {
-    if v == 0 { 1 } else if v as u16 > MAX_LEDS { MAX_LEDS as u8 } else { v }
+    if v == 0 {
+        1
+    } else if v as u16 > MAX_LEDS {
+        MAX_LEDS as u8
+    } else {
+        v
+    }
 }
 
 // --- Pixel rendering ------------------------------------------------------
@@ -215,7 +241,11 @@ fn hsv_to_rgb(h: u16, sat: u8, val: u8) -> (u8, u8, u8) {
 /// \param phase Current phase position.
 /// \return The amplitude at this phase.
 fn breath_curve(phase: u8) -> u8 {
-    if phase < 128 { phase.saturating_mul(2) } else { (255 - phase).saturating_mul(2) }
+    if phase < 128 {
+        phase.saturating_mul(2)
+    } else {
+        (255 - phase).saturating_mul(2)
+    }
 }
 
 /// \brief Render one animation frame to the pixel strip.
@@ -245,27 +275,37 @@ fn render_frame(uptime_ms: u64) {
             for i in max_idx..strip_len {
                 let _ = pixel_strip::set(i, 0, 0, 0);
             }
-            let rainbow_step = ((s().speed as u16 + 9) / 10).max(1);
+            let rainbow_step = (s().speed as u16).div_ceil(10).max(1);
             s().rainbow_offset = (offset + rainbow_step) % 360;
         }
         Effect::Static => {
             let rr = apply_brightness(r, brightness);
             let gg = apply_brightness(g, brightness);
             let bb = apply_brightness(b, brightness);
-            for i in 0..max_idx { let _ = pixel_strip::set(i, rr, gg, bb); }
-            for i in max_idx..strip_len { let _ = pixel_strip::set(i, 0, 0, 0); }
+            for i in 0..max_idx {
+                let _ = pixel_strip::set(i, rr, gg, bb);
+            }
+            for i in max_idx..strip_len {
+                let _ = pixel_strip::set(i, 0, 0, 0);
+            }
         }
         Effect::Blink => {
-            let on = (uptime_ms / 500) % 2 == 0;
+            let on = (uptime_ms / 500).is_multiple_of(2);
             let (rr, gg, bb) = if on {
-                (apply_brightness(r, brightness),
-                 apply_brightness(g, brightness),
-                 apply_brightness(b, brightness))
+                (
+                    apply_brightness(r, brightness),
+                    apply_brightness(g, brightness),
+                    apply_brightness(b, brightness),
+                )
             } else {
                 (0, 0, 0)
             };
-            for i in 0..max_idx { let _ = pixel_strip::set(i, rr, gg, bb); }
-            for i in max_idx..strip_len { let _ = pixel_strip::set(i, 0, 0, 0); }
+            for i in 0..max_idx {
+                let _ = pixel_strip::set(i, rr, gg, bb);
+            }
+            for i in max_idx..strip_len {
+                let _ = pixel_strip::set(i, 0, 0, 0);
+            }
         }
         Effect::Breathing => {
             let phase = ((uptime_ms / phase_divisor()) % 256) as u8;
@@ -276,12 +316,18 @@ fn render_frame(uptime_ms: u64) {
             let rr = dim_dither(rr_hi, &mut s().dither_acc_r);
             let gg = dim_dither(gg_hi, &mut s().dither_acc_g);
             let bb = dim_dither(bb_hi, &mut s().dither_acc_b);
-            for i in 0..max_idx { let _ = pixel_strip::set(i, rr, gg, bb); }
-            for i in max_idx..strip_len { let _ = pixel_strip::set(i, 0, 0, 0); }
+            for i in 0..max_idx {
+                let _ = pixel_strip::set(i, rr, gg, bb);
+            }
+            for i in max_idx..strip_len {
+                let _ = pixel_strip::set(i, 0, 0, 0);
+            }
         }
         Effect::Random => {
             let mut rng = (uptime_ms / random_interval()) ^ 0x9E3779B97F4A7C15;
-            if rng == 0 { rng = 0x9E3779B97F4A7C15; }
+            if rng == 0 {
+                rng = 0x9E3779B97F4A7C15;
+            }
             for i in 0..max_idx {
                 let v = xorshift64(&mut rng);
                 let (rr, gg, bb) = if v & 0b11 == 0 {
@@ -291,28 +337,36 @@ fn render_frame(uptime_ms: u64) {
                 };
                 let _ = pixel_strip::set(i, rr, gg, bb);
             }
-            for i in max_idx..strip_len { let _ = pixel_strip::set(i, 0, 0, 0); }
+            for i in max_idx..strip_len {
+                let _ = pixel_strip::set(i, 0, 0, 0);
+            }
         }
         Effect::CpuLoad => {
             // Server-rack activity look: every LED flickers independently in the
             // picked colour. CPU load raises both the change rate and how many
             // LEDs are lit, so idle = sparse slow blips, busy = dense fast churn.
             let load = sysinfo::cpu_load() as u64;
-            let interval = 600u64.saturating_sub(load * 5).max(50);  // 600..100 ms
-            let threshold = 25 + load * 55 / 100;                    // ~25..80 % lit
-            let (on_r, on_g, on_b) = (apply_brightness(r, brightness),
-                                      apply_brightness(g, brightness),
-                                      apply_brightness(b, brightness));
+            let interval = 600u64.saturating_sub(load * 5).max(50); // 600..100 ms
+            let threshold = 25 + load * 55 / 100; // ~25..80 % lit
+            let (on_r, on_g, on_b) = (
+                apply_brightness(r, brightness),
+                apply_brightness(g, brightness),
+                apply_brightness(b, brightness),
+            );
             for i in 0..max_idx {
                 // Per-LED staggered bucket -> each pixel re-rolls on its own clock.
                 let bucket = (uptime_ms + (i as u64) * 37) / interval;
                 let mut rng = bucket ^ (i as u64).wrapping_add(1).wrapping_mul(0x9E3779B97F4A7C15);
-                if rng == 0 { rng = 0x9E3779B97F4A7C15; }
+                if rng == 0 {
+                    rng = 0x9E3779B97F4A7C15;
+                }
                 let on = (xorshift64(&mut rng) % 100) < threshold;
                 let (rr, gg, bb) = if on { (on_r, on_g, on_b) } else { (0, 0, 0) };
                 let _ = pixel_strip::set(i, rr, gg, bb);
             }
-            for i in max_idx..strip_len { let _ = pixel_strip::set(i, 0, 0, 0); }
+            for i in max_idx..strip_len {
+                let _ = pixel_strip::set(i, 0, 0, 0);
+            }
         }
     }
     let _ = pixel_strip::refresh();
@@ -325,50 +379,80 @@ fn toggle_label() -> alloc::string::String {
     format!(
         "{}: {}",
         i18n::tr_key("menu_enable"),
-        if s().enabled { i18n::tr_core("core.on") } else { i18n::tr_core("core.off") },
+        if s().enabled {
+            i18n::tr_core("core.on")
+        } else {
+            i18n::tr_core("core.off")
+        },
     )
 }
 
 /// \brief Icon for the enable/disable row reflecting the current state.
 fn toggle_icon() -> u8 {
-    if s().enabled { ui::UI_ICON_SUCCESS } else { ui::UI_ICON_CIRCLE }
+    if s().enabled {
+        ui::UI_ICON_SUCCESS
+    } else {
+        ui::UI_ICON_CIRCLE
+    }
 }
 
 /// \brief Refresh just the toggle row in place, instead of re-pushing the whole
 ///        list (which would grow the view stack on every on/off toggle).
 fn refresh_toggle_row() {
-    ui::update_list_item(ITEM_TOGGLE as u16, toggle_label(), ITEM_TOGGLE, toggle_icon());
+    ui::update_list_item(
+        ITEM_TOGGLE as u16,
+        toggle_label(),
+        ITEM_TOGGLE,
+        toggle_icon(),
+    );
 }
 
 fn show_top_menu() {
     ListBuilder::new(i18n::tr_meta("name"))
         .on_select(ACT_TOP_SELECT)
-        .item(&toggle_label(), ITEM_TOGGLE, toggle_icon())
-        .item(i18n::tr_key("menu_count"),  ITEM_COUNT,  ui::UI_ICON_BAR)
-        .item(i18n::tr_core("core.brightness"), ITEM_BRIGHT, ui::UI_ICON_SUN)
-        .item(i18n::tr_key("menu_color"),  ITEM_COLOR,  ui::UI_ICON_DIAMOND)
+        .item(toggle_label(), ITEM_TOGGLE, toggle_icon())
+        .item(i18n::tr_key("menu_count"), ITEM_COUNT, ui::UI_ICON_BAR)
+        .item(
+            i18n::tr_core("core.brightness"),
+            ITEM_BRIGHT,
+            ui::UI_ICON_SUN,
+        )
+        .item(i18n::tr_key("menu_color"), ITEM_COLOR, ui::UI_ICON_DIAMOND)
         .item(i18n::tr_key("menu_effect"), ITEM_EFFECT, ui::UI_ICON_NOTES)
-        .item(i18n::tr_key("menu_speed"),  ITEM_SPEED,  ui::UI_ICON_LEFTRIGHT)
+        .item(
+            i18n::tr_key("menu_speed"),
+            ITEM_SPEED,
+            ui::UI_ICON_LEFTRIGHT,
+        )
         .replace();
 }
 
 fn show_speed_slider() {
     SliderBuilder::new(i18n::tr_key("menu_speed"))
-        .range(1, 100).initial(s().speed as i32).step(5)
+        .range(1, 100)
+        .initial(s().speed as i32)
+        .step(5)
         .unit("%")
-        .on_save(ACT_SPEED_SAVE).push();
+        .on_save(ACT_SPEED_SAVE)
+        .push();
 }
 
 fn show_count_slider() {
     SliderBuilder::new(i18n::tr_key("menu_count"))
-        .range(1, MAX_LEDS as i32).initial(s().count as i32).step(1)
-        .on_save(ACT_COUNT_SAVE).push();
+        .range(1, MAX_LEDS as i32)
+        .initial(s().count as i32)
+        .step(1)
+        .on_save(ACT_COUNT_SAVE)
+        .push();
 }
 
 fn show_bright_slider() {
     SliderBuilder::new(i18n::tr_core("core.brightness"))
-        .range(0, 255).initial(s().brightness as i32).step(5)
-        .on_save(ACT_BRIGHT_SAVE).push();
+        .range(0, 255)
+        .initial(s().brightness as i32)
+        .step(5)
+        .on_save(ACT_BRIGHT_SAVE)
+        .push();
 }
 
 fn show_color_picker() {
@@ -378,12 +462,12 @@ fn show_color_picker() {
 fn show_effect_menu() {
     ListBuilder::new(i18n::tr_key("menu_effect"))
         .on_select(ACT_EFFECT_SELECT)
-        .item(i18n::tr_key("effect_rainbow"),   0, ui::UI_ICON_DIAMOND)
-        .item(i18n::tr_key("effect_static"),    1, ui::UI_ICON_CIRCLE)
-        .item(i18n::tr_key("effect_blink"),     2, ui::UI_ICON_ALERT)
+        .item(i18n::tr_key("effect_rainbow"), 0, ui::UI_ICON_DIAMOND)
+        .item(i18n::tr_key("effect_static"), 1, ui::UI_ICON_CIRCLE)
+        .item(i18n::tr_key("effect_blink"), 2, ui::UI_ICON_ALERT)
         .item(i18n::tr_key("effect_breathing"), 3, ui::UI_ICON_UPDOWN)
-        .item(i18n::tr_key("effect_random"),    4, ui::UI_ICON_ALERT)
-        .item(i18n::tr_key("effect_cpuload"),   5, ui::UI_ICON_BAR)
+        .item(i18n::tr_key("effect_random"), 4, ui::UI_ICON_ALERT)
+        .item(i18n::tr_key("effect_cpuload"), 5, ui::UI_ICON_BAR)
         .push();
 }
 
@@ -452,8 +536,12 @@ pub extern "C" fn plugin_on_exit() -> i32 {
 /// \return `0` on success.
 #[no_mangle]
 pub extern "C" fn plugin_on_tick(uptime_ms: u64) -> i32 {
-    if s().sleeping { return 0; }
-    if uptime_ms.saturating_sub(s().last_frame_ms) < FRAME_INTERVAL_MS { return 0; }
+    if s().sleeping {
+        return 0;
+    }
+    if uptime_ms.saturating_sub(s().last_frame_ms) < FRAME_INTERVAL_MS {
+        return 0;
+    }
     render_frame(uptime_ms);
     0
 }
@@ -481,7 +569,9 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
                 let _ = pixel_strip::clear();
                 let _ = pixel_strip::refresh();
             }
-            ET_SYSTEM_WAKE => { s().sleeping = false; }
+            ET_SYSTEM_WAKE => {
+                s().sleeping = false;
+            }
             _ => {}
         },
         ACT_TOP_SELECT => match idx {
@@ -495,11 +585,11 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, _user_data: u32) ->
                 update_caffeinate();
                 refresh_toggle_row();
             }
-            ITEM_COUNT  => show_count_slider(),
+            ITEM_COUNT => show_count_slider(),
             ITEM_BRIGHT => show_bright_slider(),
-            ITEM_COLOR  => show_color_picker(),
+            ITEM_COLOR => show_color_picker(),
             ITEM_EFFECT => show_effect_menu(),
-            ITEM_SPEED  => show_speed_slider(),
+            ITEM_SPEED => show_speed_slider(),
             _ => {}
         },
         ACT_COUNT_SAVE => {

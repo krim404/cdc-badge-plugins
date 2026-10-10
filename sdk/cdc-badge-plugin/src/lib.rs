@@ -172,11 +172,41 @@ macro_rules! plugin_main {
     };
 }
 
+/// Fixed panic-message buffer: the handler must not allocate (an OOM panic
+/// would recurse) and keeps a NUL byte for the host.
+#[cfg(all(feature = "panic_handler", target_arch = "wasm32"))]
+const PANIC_MSG_CAP: usize = 256;
+
 #[cfg(all(feature = "panic_handler", target_arch = "wasm32"))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    use alloc::format;
-    let msg = format!("{}", info);
-    crate::log::error("PANIC", &msg);
-    loop {}
+    use core::fmt::Write;
+
+    struct Buf {
+        data: [u8; PANIC_MSG_CAP],
+        len: usize,
+    }
+    impl Write for Buf {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            let room = PANIC_MSG_CAP - 1 - self.len;
+            let n = s.len().min(room);
+            self.data[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
+            self.len += n;
+            Ok(())
+        }
+    }
+
+    let mut buf = Buf {
+        data: [0u8; PANIC_MSG_CAP],
+        len: 0,
+    };
+    let _ = write!(buf, "{}", info);
+    unsafe {
+        ffi::host_log(
+            ffi::LOG_LEVEL_ERROR,
+            c"PANIC".as_ptr(),
+            buf.data.as_ptr() as *const core::ffi::c_char,
+        );
+        core::arch::wasm32::unreachable()
+    }
 }

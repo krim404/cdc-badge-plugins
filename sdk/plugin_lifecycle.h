@@ -8,9 +8,7 @@
  * and a missing export causes the plugin to be rejected.
  */
 
-#ifndef CDC_BADGE_PLUGIN_LIFECYCLE_H
-#define CDC_BADGE_PLUGIN_LIFECYCLE_H
-
+#pragma once
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -41,4 +39,3 @@ int plugin_on_prerequisite_failed(uint32_t prereq_id, uint32_t error_code);
 }
 #endif
 
-#endif /* CDC_BADGE_PLUGIN_LIFECYCLE_H */

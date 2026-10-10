@@ -5,10 +5,13 @@
 //! automatically by the host at plugin load and can be looked up here by
 //! their key. The host writes the resolved string into a caller-provided
 //! buffer; the returned `&'static str` is owned by the plugin runtime and
-//! valid for the lifetime of the plugin instance.
+//! valid for the lifetime of the plugin instance. Each (table, key) pair is
+//! resolved once per plugin instance and cached, so a language change
+//! while the plugin is loaded is not reflected until it is reloaded.
 
 use crate::ffi;
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
 use alloc::string::String;
 use core::ffi::c_char;
@@ -33,10 +36,25 @@ pub fn current_language() -> Language {
 
 const SCRATCH_CAP: usize = 128;
 
-fn lookup(
-    host_fn: unsafe extern "C" fn(*const c_char, *mut c_char, u32) -> core::ffi::c_int,
-    key: &str,
-) -> &'static str {
+type HostFn = unsafe extern "C" fn(*const c_char, *mut c_char, u32) -> core::ffi::c_int;
+
+/// Resolved strings keyed by (host table, key). WAMR serialises every call
+/// into the plugin, so the single mutable map is only ever touched by one
+/// frame at a time.
+static mut CACHE: BTreeMap<(usize, String), &'static str> = BTreeMap::new();
+
+fn lookup(host_fn: HostFn, key: &str) -> &'static str {
+    let cache = unsafe { &mut *core::ptr::addr_of_mut!(CACHE) };
+    let id = (host_fn as usize, String::from(key));
+    if let Some(s) = cache.get(&id) {
+        return s;
+    }
+    let s = resolve(host_fn, key);
+    cache.insert(id, s);
+    s
+}
+
+fn resolve(host_fn: HostFn, key: &str) -> &'static str {
     let Ok(k) = CString::new(key) else {
         return "";
     };

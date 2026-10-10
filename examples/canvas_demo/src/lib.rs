@@ -180,9 +180,7 @@ const ARROW: [u16; 16] = [
 ];
 
 const CHECK: [u16; 16] = [
-    0xF0F0, 0xF0F0, 0xF0F0, 0xF0F0,
-    0x0F0F, 0x0F0F, 0x0F0F, 0x0F0F,
-    0xF0F0, 0xF0F0, 0xF0F0, 0xF0F0,
+    0xF0F0, 0xF0F0, 0xF0F0, 0xF0F0, 0x0F0F, 0x0F0F, 0x0F0F, 0x0F0F, 0xF0F0, 0xF0F0, 0xF0F0, 0xF0F0,
     0x0F0F, 0x0F0F, 0x0F0F, 0x0F0F,
 ];
 
@@ -251,12 +249,7 @@ fn gray_fill(rows: &[u16]) -> Vec<u8> {
 /// Build a `w x h` ordered-dither ramp, white on the left fading to black on the
 /// right, demonstrating simulated grayscale via a 4x4 Bayer matrix.
 fn dither_ramp(w: usize, h: usize) -> Vec<u8> {
-    const BAYER: [[u8; 4]; 4] = [
-        [0, 8, 2, 10],
-        [12, 4, 14, 6],
-        [3, 11, 1, 9],
-        [15, 7, 13, 5],
-    ];
+    const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
     let stride = w.div_ceil(8);
     let mut out = alloc::vec![0u8; stride * h];
     for y in 0..h {
@@ -387,9 +380,17 @@ fn page_symbols(_w: i16) {
     // CP437 high half reached via the glyphs' normal Unicode characters; the
     // host's UTF-8 -> CP437 converter maps them to the right bytes.
     canvas::draw_text(0, 32, "box \u{250C}\u{252C}\u{2510}\u{251C}\u{253C}\u{2524}\u{2514}\u{2534}\u{2518}\u{2500}\u{2502}");
-    canvas::draw_text(0, 48, "blk \u{2591}\u{2592}\u{2593}\u{2588}\u{2584}\u{258C}\u{2590}\u{2580}\u{25A0}");
+    canvas::draw_text(
+        0,
+        48,
+        "blk \u{2591}\u{2592}\u{2593}\u{2588}\u{2584}\u{258C}\u{2590}\u{2580}\u{25A0}",
+    );
     canvas::draw_text(0, 64, "mth \u{00B0}\u{00B1}\u{00F7}\u{2248}\u{221A}\u{207F}\u{00B2}\u{00B7}\u{221E}\u{2261}\u{2264}\u{2265}");
-    canvas::draw_text(0, 80, "grk \u{03B1}\u{00DF}\u{03C0}\u{03A3}\u{00B5}\u{03A9}\u{0398}\u{03B4}\u{03C6}\u{03B5}");
+    canvas::draw_text(
+        0,
+        80,
+        "grk \u{03B1}\u{00DF}\u{03C0}\u{03A3}\u{00B5}\u{03A9}\u{0398}\u{03B4}\u{03C6}\u{03B5}",
+    );
 }
 
 fn page_shades(w: i16) {
@@ -603,7 +604,8 @@ fn page_sprites(w: i16, h: i16) {
         canvas::elem_begin(ELEM_WALKER).ok();
         canvas::draw_sprite(2, 20, s.handle()).ok();
         canvas::elem_end();
-        s.play(sprite::Mode::Loop, 250, sprite::REPEAT_FOREVER, 0).ok();
+        s.play(sprite::Mode::Loop, 250, sprite::REPEAT_FOREVER, 0)
+            .ok();
         WALKER_RIGHT.set(false); // walker_leg() flips to "right" first
         walker_leg();
     }
@@ -743,7 +745,8 @@ fn page_motion(w: i16, h: i16) {
     if let Ok(s) = sprite::spinner() {
         s.set_scale(2).ok();
         canvas::draw_sprite(60, 62, s.handle()).ok();
-        s.play(sprite::Mode::Loop, 150, sprite::REPEAT_FOREVER, 0).ok();
+        s.play(sprite::Mode::Loop, 150, sprite::REPEAT_FOREVER, 0)
+            .ok();
     }
 
     // White ink: a cut-out circle and label inside a black band.
@@ -836,17 +839,13 @@ pub extern "C" fn plugin_on_exit() -> i32 {
 #[no_mangle]
 pub extern "C" fn plugin_on_tick(uptime_ms: u64) -> i32 {
     match PAGE.get() {
-        PAGE_ANIM => {
-            if uptime_ms.saturating_sub(LAST_STEP_MS.get()) >= ANIM_STEP_MS {
-                LAST_STEP_MS.set(uptime_ms);
-                anim_tick();
-            }
+        PAGE_ANIM if uptime_ms.saturating_sub(LAST_STEP_MS.get()) >= ANIM_STEP_MS => {
+            LAST_STEP_MS.set(uptime_ms);
+            anim_tick();
         }
-        PAGE_LAYERS => {
-            if uptime_ms.saturating_sub(LAST_LAYER_MS.get()) >= 1000 {
-                LAST_LAYER_MS.set(uptime_ms);
-                layer_counter_tick();
-            }
+        PAGE_LAYERS if uptime_ms.saturating_sub(LAST_LAYER_MS.get()) >= 1000 => {
+            LAST_LAYER_MS.set(uptime_ms);
+            layer_counter_tick();
         }
         _ => {}
     }

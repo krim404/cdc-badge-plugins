@@ -64,7 +64,7 @@ pub fn scan(bus: u8) -> Result<Vec<u8>> {
     let mut count: usize = buf.len();
     let rc = unsafe { host_i2c_scan(bus, buf.as_mut_ptr(), &mut count) };
     check(rc)?;
-    Ok(buf[..count].to_vec())
+    Ok(buf[..count.min(buf.len())].to_vec())
 }
 
 #[link(wasm_import_module = "cdc")]

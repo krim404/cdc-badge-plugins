@@ -232,8 +232,14 @@ pub fn blink(elem_id: u32, period_ms: u16, count: u16, done_action_id: u32) -> R
 /// Starts one tween per element from its current offset; returns the handle
 /// of the last one (chain the next scene's entrance with [`Anim::after`] on
 /// it).
-pub fn slide_group(elem_ids: &[u32], dx: i16, dy: i16, duration_ms: u16,
-                   ease: Ease, done_action_id: u32) -> Result<u32> {
+pub fn slide_group(
+    elem_ids: &[u32],
+    dx: i16,
+    dy: i16,
+    duration_ms: u16,
+    ease: Ease,
+    done_action_id: u32,
+) -> Result<u32> {
     let mut last = Err(crate::Error::NotFound);
     for (i, &id) in elem_ids.iter().enumerate() {
         let mut a = Anim::element(id)

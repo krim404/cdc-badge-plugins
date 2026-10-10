@@ -8,6 +8,7 @@
 use crate::{check, ffi, Error, Result};
 use alloc::ffi::CString;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 
 /// \brief Read a binary blob from NVS.
@@ -43,11 +44,9 @@ pub fn set_blob(key: &str, value: &[u8]) -> Result<()> {
 /// \return The stored string, or `None` if missing / non-UTF-8.
 pub fn get_str(key: &str, max_len: usize) -> Option<String> {
     let k = CString::new(key).ok()?;
-    let mut buf = Vec::<u8>::with_capacity(max_len);
-    let rc = unsafe {
-        buf.set_len(max_len);
-        ffi::host_nvs_get_str(k.as_ptr(), buf.as_mut_ptr() as *mut _, max_len)
-    };
+    let cap = max_len.saturating_add(1);
+    let mut buf = vec![0u8; cap];
+    let rc = unsafe { ffi::host_nvs_get_str(k.as_ptr(), buf.as_mut_ptr() as *mut _, cap) };
     if rc != 0 {
         return None;
     }
@@ -108,21 +107,21 @@ pub fn erase_all() -> Result<()> {
 }
 
 /// \brief Enumerate the keys stored in the plugin's namespace.
-/// \param max_bytes Capacity for the NUL-separated key list returned by the host.
+/// \param max_bytes Capacity for the newline-separated key list returned by
+///        the host; keys beyond it are dropped.
 /// \return The keys, or `None` on failure.
 pub fn list_keys(max_bytes: usize) -> Option<Vec<String>> {
-    let mut buf = Vec::<u8>::with_capacity(max_bytes);
+    let mut buf = vec![0u8; max_bytes];
     let mut len = max_bytes;
-    let rc = unsafe {
-        buf.set_len(max_bytes);
-        ffi::host_nvs_list_keys(buf.as_mut_ptr() as *mut _, &mut len)
-    };
+    let rc = unsafe { ffi::host_nvs_list_keys(buf.as_mut_ptr() as *mut _, &mut len) };
     if rc != 0 {
         return None;
     }
-    buf.truncate(len);
+    buf.truncate(len.min(max_bytes));
+    // A key that did not fit leaves a zero-filled hole before the next one.
     let keys = buf
-        .split(|&b| b == 0)
+        .split(|&b| b == b'\n')
+        .map(|s| s.iter().position(|&b| b != 0).map_or(&s[..0], |i| &s[i..]))
         .filter(|s| !s.is_empty())
         .filter_map(|s| core::str::from_utf8(s).ok().map(String::from))
         .collect();

@@ -327,7 +327,10 @@ fn do_export() {
         return;
     }
     let name = match time::local_time() {
-        Some(t) => format!("{:02}{:02}-{:02}{:02}.txt", t.day, t.month, t.hour, t.minute),
+        Some(t) => format!(
+            "{:02}{:02}-{:02}{:02}.txt",
+            t.day, t.month, t.hour, t.minute
+        ),
         None => String::from("calc.txt"),
     };
     let text = build_history_text();

@@ -293,12 +293,7 @@ extern "C" {
     pub fn host_anim_pause(handle: u32, paused: bool) -> c_int;
     pub fn host_anim_state(handle: u32) -> c_int;
     pub fn host_anim_active_count() -> c_int;
-    pub fn host_anim_blink(
-        elem_id: u32,
-        period_ms: u16,
-        count: u16,
-        done_action_id: u32,
-    ) -> c_int;
+    pub fn host_anim_blink(elem_id: u32, period_ms: u16, count: u16, done_action_id: u32) -> c_int;
     pub fn host_view_canvas_add_slider(
         widget_id: u32,
         min: i32,

@@ -116,7 +116,10 @@ fn open_menu() {
 /// Step the (transient) backlight one notch and apply it live.
 fn step_backlight(brighter: bool) {
     let next = if brighter {
-        BACKLIGHT.get().saturating_add(BACKLIGHT_STEP).min(BACKLIGHT_MAX)
+        BACKLIGHT
+            .get()
+            .saturating_add(BACKLIGHT_STEP)
+            .min(BACKLIGHT_MAX)
     } else {
         BACKLIGHT.get().saturating_sub(BACKLIGHT_STEP)
     };

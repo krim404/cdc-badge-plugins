@@ -156,7 +156,7 @@ pub fn format_num(x: f64) -> String {
         return "inf".to_string();
     }
     let a = libm::fabs(x);
-    if a >= 1e16 || a < 1e-9 {
+    if !(1e-9..1e16).contains(&a) {
         return format_sci(x);
     }
     let mut s = format!("{:.10}", x);
@@ -265,6 +265,7 @@ impl Calc {
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn from_rad(&self, x: f64) -> f64 {
         match self.angle {
             AngleMode::Deg => x * 180.0 / PI,
@@ -362,8 +363,8 @@ impl Calc {
             return;
         }
         let cur = self.value();
-        if self.pending.is_some() && !self.new_entry {
-            match self.pending.unwrap().apply(self.acc, cur) {
+        if let Some(p) = self.pending.filter(|_| !self.new_entry) {
+            match p.apply(self.acc, cur) {
                 Ok(v) => self.acc = v,
                 Err(e) => {
                     self.error = Some(e);
@@ -482,7 +483,12 @@ impl Calc {
         };
         match res {
             Ok(v) => {
-                self.push_history(format!("{}({}) = {}", u.name(), format_num(x), format_num(v)));
+                self.push_history(format!(
+                    "{}({}) = {}",
+                    u.name(),
+                    format_num(x),
+                    format_num(v)
+                ));
                 self.set_result(v);
             }
             Err(e) => self.error = Some(e),

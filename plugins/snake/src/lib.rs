@@ -183,7 +183,10 @@ mod plugin {
                 let new_best = save_best_if_beaten(level, score);
                 NEW_BEST.set(new_best);
                 if new_best {
-                    log::info(TAG, &alloc::format!("new best {} on level {}", score, level));
+                    log::info(
+                        TAG,
+                        &alloc::format!("new best {} on level {}", score, level),
+                    );
                 }
                 SCREEN.set(Screen::Crashing);
                 CRASH_MS.set(time::uptime_ms());
@@ -348,10 +351,8 @@ mod plugin {
             }
             // Safety net: if the explosion's completion action never
             // arrives, force the game-over panel instead of hanging.
-            Screen::Crashing => {
-                if uptime_ms.saturating_sub(CRASH_MS.get()) >= CRASH_FX_TIMEOUT_MS {
-                    show_game_over_panel();
-                }
+            Screen::Crashing if uptime_ms.saturating_sub(CRASH_MS.get()) >= CRASH_FX_TIMEOUT_MS => {
+                show_game_over_panel();
             }
             _ => {}
         }
