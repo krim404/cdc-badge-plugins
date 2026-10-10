@@ -7,24 +7,31 @@
 
 use crate::json::{self, LoginResult, SyncResult};
 use crate::model::Session;
-use cdc_badge_plugin::{http, log};
 use alloc::format;
 use alloc::string::String;
+use cdc_badge_plugin::{http, log};
 
 const TAG: &str = "matrix";
 
-/// Limit the sync payload: only the last few timeline events, no presence or
-/// account data. Keeps the buffered response small on the badge.
-// Full member state is kept (no lazy loading) so E2EE key distribution can
-// address every joined device.
-const SYNC_FILTER: &str = "{\"room\":{\"timeline\":{\"limit\":10}},\"presence\":{\"types\":[]},\"account_data\":{\"types\":[]}}";
+/// Limit the sync payload: only the last few timeline events, lazily loaded
+/// members, no presence or account data. Keeps the buffered response small on
+/// the badge; key distribution fetches the full member list with
+/// [`room_members`].
+const SYNC_FILTER: &str = "{\"room\":{\"timeline\":{\"limit\":10},\"state\":{\"lazy_load_members\":true}},\"presence\":{\"types\":[]},\"account_data\":{\"types\":[]}}";
+/// Cap for response bodies that scale with room or backup size.
+const BODY_MAX: usize = 256 * 1024;
 
 fn auth(req: &http::Request, token: &str) {
     let _ = req.header("Authorization", &format!("Bearer {}", token));
 }
 
 /// `POST /login` with `m.login.password`.
-pub fn login(base_url: &str, user: &str, password: &str, device_id: Option<&str>) -> Option<LoginResult> {
+pub fn login(
+    base_url: &str,
+    user: &str,
+    password: &str,
+    device_id: Option<&str>,
+) -> Option<LoginResult> {
     let url = format!("{}/_matrix/client/v3/login", base_url);
     // Reuse a prior device_id so the server does not register a fresh device on
     // every login (which accumulates dead devices and drifts the account's
@@ -72,12 +79,36 @@ pub fn sync(s: &Session, full: bool) -> Option<SyncResult> {
     let req = http::Request::open(http::GET, &url, 20000).ok()?;
     auth(&req, &s.token);
     let status = req.perform().ok()?;
-    let text = req.read_to_string().ok()?;
+    let text = req.read_to_string_max(BODY_MAX).ok()?;
     if status != 200 {
         log::warn(TAG, &format!("sync HTTP {}", status));
         return None;
     }
     json::parse_sync(&text)
+}
+
+/// `GET /rooms/{id}/members?membership=join` -> joined member MXIDs.
+pub fn room_members(s: &Session, room_id: &str) -> Option<alloc::vec::Vec<String>> {
+    let url = format!(
+        "{}/_matrix/client/v3/rooms/{}/members?membership=join",
+        s.base_url,
+        json::urlencode(room_id)
+    );
+    let req = http::Request::open(http::GET, &url, 20000).ok()?;
+    auth(&req, &s.token);
+    let status = req.perform().ok()?;
+    let text = req.read_to_string_max(BODY_MAX).ok()?;
+    if status != 200 {
+        log::warn(TAG, &format!("members HTTP {}", status));
+        return None;
+    }
+    Some(json::parse_members(&text))
+}
+
+/// `POST /logout`: invalidates the access token server-side.
+pub fn logout(s: &Session) -> bool {
+    let url = format!("{}/_matrix/client/v3/logout", s.base_url);
+    post_empty(s, &url)
 }
 
 /// `GET /rooms/{id}/messages?dir=b&limit=N` -> recent history (back-pagination),
@@ -92,7 +123,7 @@ pub fn room_messages(s: &Session, room_id: &str, limit: u32) -> Option<String> {
     let req = http::Request::open(http::GET, &url, 20000).ok()?;
     auth(&req, &s.token);
     let status = req.perform().ok()?;
-    let text = req.read_to_string().ok()?;
+    let text = req.read_to_string_max(BODY_MAX).ok()?;
     if status != 200 {
         log::warn(TAG, &format!("messages HTTP {}", status));
         return None;
@@ -122,7 +153,10 @@ pub fn send_text(s: &Session, room_id: &str, text: &str, txn: u64) -> bool {
         json::urlencode(room_id),
         txn
     );
-    let body = format!("{{\"msgtype\":\"m.text\",\"body\":\"{}\"}}", json::json_escape(text));
+    let body = format!(
+        "{{\"msgtype\":\"m.text\",\"body\":\"{}\"}}",
+        json::json_escape(text)
+    );
     let req = match http::Request::open(http::PUT, &url, 10000) {
         Ok(r) => r,
         Err(_) => return false,
@@ -138,7 +172,11 @@ pub fn send_text(s: &Session, room_id: &str, text: &str, txn: u64) -> bool {
 
 /// `POST /join/{idOrAlias}`. Returns the joined room id on success.
 pub fn join(s: &Session, id_or_alias: &str) -> Option<String> {
-    let url = format!("{}/_matrix/client/v3/join/{}", s.base_url, json::urlencode(id_or_alias));
+    let url = format!(
+        "{}/_matrix/client/v3/join/{}",
+        s.base_url,
+        json::urlencode(id_or_alias)
+    );
     let req = http::Request::open(http::POST, &url, 15000).ok()?;
     auth(&req, &s.token);
     let _ = req.header("Content-Type", "application/json");
@@ -150,7 +188,12 @@ pub fn join(s: &Session, id_or_alias: &str) -> Option<String> {
         return None;
     }
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    Some(v.get("room_id").and_then(|r| r.as_str()).unwrap_or(id_or_alias).into())
+    Some(
+        v.get("room_id")
+            .and_then(|r| r.as_str())
+            .unwrap_or(id_or_alias)
+            .into(),
+    )
 }
 
 /// `POST /createRoom` for a direct chat: invites `mxid`, flags `is_direct`, and
@@ -253,7 +296,7 @@ pub fn backup_keys(s: &Session, version: &str) -> Option<String> {
     let req = http::Request::open(http::GET, &url, 25000).ok()?;
     auth(&req, &s.token);
     let status = req.perform().ok()?;
-    let text = req.read_to_string().ok()?;
+    let text = req.read_to_string_max(BODY_MAX).ok()?;
     if status != 200 {
         log::warn(TAG, &format!("backup keys HTTP {}", status));
         return None;

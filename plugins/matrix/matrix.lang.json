@@ -45,7 +45,9 @@
       "hint_chat": "[Y] Antworten [3] Menue [N] Zurueck",
       "decrypt_failed": "(verschluesselt)",
       "no_messages": "(keine Nachrichten)",
-      "e2ee_no_key": "Kein E2EE-Schluessel - Antworten hier nicht moeglich"
+      "e2ee_no_key": "Kein E2EE-Schluessel - Antworten hier nicht moeglich",
+      "secret_save_failed": "Sicherer Speicher fehlgeschlagen - nicht gespeichert",
+      "crypto_init_failed": "E2EE-Speicher nicht verfuegbar"
     }
   }
 }

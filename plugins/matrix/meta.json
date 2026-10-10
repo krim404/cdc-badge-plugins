@@ -57,7 +57,9 @@
       "hint_chat": { "en": "[Y] Reply [3] Menu [N] Back" },
       "decrypt_failed": { "en": "(encrypted)" },
       "no_messages": { "en": "(no messages)" },
-      "e2ee_no_key": { "en": "No E2EE key - cannot reply here" }
+      "e2ee_no_key": { "en": "No E2EE key - cannot reply here" },
+      "secret_save_failed": { "en": "Secure storage failed - not saved" },
+      "crypto_init_failed": { "en": "E2EE storage unavailable" }
     }
   },
   "capabilities": {

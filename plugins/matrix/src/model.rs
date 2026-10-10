@@ -35,6 +35,8 @@ pub struct Session {
 pub struct EncInfo {
     pub session_id: String,
     pub ciphertext: String,
+    /// Sender device curve25519 key from the event content, empty if absent.
+    pub sender_key: String,
 }
 
 /// One displayed timeline message.

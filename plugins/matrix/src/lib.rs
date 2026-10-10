@@ -17,6 +17,7 @@
 // valid unchanged.
 extern crate alloc;
 
+use alloc::collections::VecDeque;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -36,6 +37,8 @@ mod getrandom_shim;
 
 #[cfg(test)]
 mod host_test_stubs;
+#[cfg(test)]
+mod store_test_stubs;
 
 use actions::*;
 use model::{Room, Session, RETAIN};
@@ -100,8 +103,9 @@ static CRYPTO_HASH: PluginCell<u64> = PluginCell::new(0);
 static LAST_POLL_MS: PluginCell<u64> = PluginCell::new(0);
 /// Chat scroll offset in lines, counted up from the newest message (0 = bottom).
 static SCROLL: PluginCell<usize> = PluginCell::new(0);
-/// Pending background room-key distribution, processed in chunks across ticks.
-static PENDING_DIST: PluginCell<Option<PendingDist>> = PluginCell::new(None);
+/// Pending background room-key distributions, processed in chunks across
+/// ticks, oldest first.
+static PENDING_DIST: PluginCell<VecDeque<PendingDist>> = PluginCell::new(VecDeque::new());
 
 /// Auto-refresh interval for the room list / open chat. Short enough that new
 /// messages surface without a manual sync; `/sync` uses `timeout=0`, so each
@@ -118,6 +122,8 @@ const OTK_TARGET: u32 = 20;
 /// Each tick blocks input/GUI for its duration (plugin_on_tick shares the host
 /// call_mutex with key dispatch), so this is a balance, not to be raised freely.
 const DIST_CHUNK: usize = 4;
+/// Attempts per `sendToDevice` chunk before its recipients are given up.
+const DIST_MAX_RETRIES: u8 = 3;
 
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -133,8 +139,22 @@ fn set_view(v: View) {
 }
 
 /// Load (or create + persist) the Olm account, attach the backup decryptor if a
-/// recovery key is set, then pull the key backup.
+/// recovery key is set, then pull the key backup. A live instance is kept as
+/// is (its sessions are newer than the persisted snapshot); only the backup
+/// setup is repeated.
 fn init_crypto() {
+    if CRYPTO.borrow().is_some() {
+        setup_backup();
+        let have_sessions = CRYPTO
+            .borrow()
+            .as_ref()
+            .map(|c| c.session_count() > 0)
+            .unwrap_or(false);
+        if !have_sessions {
+            refresh_backup();
+        }
+        return;
+    }
     let mut c = match store::load_account().and_then(|b| crypto::Crypto::from_account_pickle(&b)) {
         Some(c) => c,
         None => {
@@ -143,11 +163,17 @@ fn init_crypto() {
                 // Creating a fresh one would rotate the device identity and break
                 // every existing session and the server's view of our keys. Refuse
                 // and leave crypto uninitialised; the user can reset the module.
-                log::error(TAG, "account present but unreadable; refusing to rotate identity");
+                log::error(
+                    TAG,
+                    "account present but unreadable; refusing to rotate identity",
+                );
                 return;
             }
             let fresh = crypto::Crypto::create();
-            store::save_account(&fresh.account_pickle());
+            if !store::save_account(&fresh.account_pickle()) {
+                ui::push_toast(i18n::tr_key("crypto_init_failed"), ui::UI_ICON_ERROR, 2500);
+                return;
+            }
             fresh
         }
     };
@@ -228,7 +254,12 @@ fn refresh_backup() {
         Some(s) => s,
         None => return,
     };
-    if !CRYPTO.borrow().as_ref().map(|c| c.has_backup()).unwrap_or(false) {
+    if !CRYPTO
+        .borrow()
+        .as_ref()
+        .map(|c| c.has_backup())
+        .unwrap_or(false)
+    {
         return; // no recovery key -> nothing to fetch
     }
     let version = match client::backup_version(&sess) {
@@ -244,9 +275,18 @@ fn refresh_backup() {
         let mut guard = CRYPTO.borrow_mut();
         if let Some(c) = guard.as_mut() {
             for bs in &sessions {
-                c.import_backup_session(&bs.session_id, &bs.ciphertext, &bs.mac, &bs.ephemeral);
+                c.import_backup_session(
+                    &bs.room_id,
+                    &bs.session_id,
+                    &bs.ciphertext,
+                    &bs.mac,
+                    &bs.ephemeral,
+                );
             }
-            log::info(TAG, &alloc::format!("backup: {} sessions", c.session_count()));
+            log::info(
+                TAG,
+                &alloc::format!("backup: {} sessions", c.session_count()),
+            );
         }
     }
     persist_crypto();
@@ -260,7 +300,10 @@ fn backup_room_key(sess: &Session, room_id: &str, session_id: &str) {
         Some(v) => v,
         None => return,
     };
-    let blob = CRYPTO.borrow().as_ref().and_then(|c| c.backup_session_blob(session_id));
+    let blob = CRYPTO
+        .borrow()
+        .as_ref()
+        .and_then(|c| c.backup_session_blob(session_id));
     let (ciphertext, mac, ephemeral) = match blob {
         Some(b) => b,
         None => return,
@@ -282,14 +325,17 @@ fn next_txn() -> u64 {
     time::uptime_ms().wrapping_mul(1000).wrapping_add(*t)
 }
 
+/// Homeserver URL as typed, always `https://`: the password and access token
+/// travel in every request, so a plain `http://` prefix is upgraded.
 fn normalize_server(raw: &str) -> String {
     let s = raw.trim().trim_end_matches('/');
-    if s.is_empty() {
+    let host = s.strip_prefix("http://").unwrap_or(s);
+    if host.is_empty() {
         String::new()
-    } else if s.starts_with("http://") || s.starts_with("https://") {
-        s.to_string()
+    } else if host.starts_with("https://") {
+        host.to_string()
     } else {
-        alloc::format!("https://{}", s)
+        alloc::format!("https://{}", host)
     }
 }
 
@@ -339,12 +385,21 @@ fn sync_now(full: bool) {
                 let mut matched = 0u32;
                 let mut decrypted = 0u32;
                 let mut imported = 0u32;
-                for td in result.to_device.iter().filter(|t| t.recipient_curve == my_curve) {
+                for td in result
+                    .to_device
+                    .iter()
+                    .filter(|t| t.recipient_curve == my_curve)
+                {
                     matched += 1;
                     if let Some(plain) = c.olm_decrypt(&td.sender_key, td.msg_type, &td.body) {
                         decrypted += 1;
-                        if let Some((sid, skey)) = json::parse_room_key(&plain) {
-                            if c.import_room_key(&sid, &skey) {
+                        if let Some(k) = json::parse_room_key(&plain) {
+                            if c.import_room_key(
+                                &k.session_id,
+                                &k.session_key,
+                                &k.room_id,
+                                &td.sender_key,
+                            ) {
                                 imported += 1;
                             }
                         }
@@ -355,7 +410,10 @@ fn sync_now(full: bool) {
                         TAG,
                         &alloc::format!(
                             "to_device: {} total, {} for us, {} decrypted, {} keys",
-                            total, matched, decrypted, imported
+                            total,
+                            matched,
+                            decrypted,
+                            imported
                         ),
                     );
                 }
@@ -378,7 +436,12 @@ fn sync_now(full: bool) {
             for up in result.rooms.iter_mut() {
                 for m in up.messages.iter_mut() {
                     if let Some(enc) = m.enc.clone() {
-                        if let Some(body) = c.decrypt_megolm(&enc.session_id, &enc.ciphertext) {
+                        if let Some(body) = c.decrypt_megolm(
+                            &enc.session_id,
+                            &enc.ciphertext,
+                            &up.id,
+                            &enc.sender_key,
+                        ) {
                             m.body = body;
                             m.encrypted = false;
                             m.enc = None;
@@ -390,8 +453,14 @@ fn sync_now(full: bool) {
     }
     let invite_count = result.rooms.iter().filter(|r| r.invited).count();
     if invite_count > 0 {
-        log::info(TAG, &alloc::format!("sync: {} invite(s) full={}", invite_count, full));
+        log::info(
+            TAG,
+            &alloc::format!("sync: {} invite(s) full={}", invite_count, full),
+        );
     }
+    // Rooms whose live outbound session must reach members who joined after
+    // it was distributed: `(room_id, new members)`.
+    let mut late_joiners: Vec<(String, Vec<String>)> = Vec::new();
     let mut rooms = ROOMS.borrow_mut();
     for up in result.rooms {
         let idx = rooms.iter().position(|r| r.id == up.id);
@@ -415,7 +484,13 @@ fn sync_now(full: bool) {
                 .member_names
                 .iter()
                 .find(|(uid, _)| uid != &sess.user_id)
-                .map(|(uid, dn)| if dn.is_empty() { json::short_sender(uid) } else { dn.clone() })
+                .map(|(uid, dn)| {
+                    if dn.is_empty() {
+                        json::short_sender(uid)
+                    } else {
+                        dn.clone()
+                    }
+                })
             {
                 room.name = label;
                 room.is_dm = true;
@@ -427,9 +502,26 @@ fn sync_now(full: bool) {
         // A room appears under rooms.invite while pending, then rooms.join once
         // accepted; track that so the list/menu can offer accept/reject.
         room.invited = up.invited;
+        let mut joined: Vec<String> = Vec::new();
         for member in up.members {
             if !room.members.contains(&member) {
-                room.members.push(member);
+                room.members.push(member.clone());
+                joined.push(member);
+            }
+        }
+        room.members.retain(|m| !up.left_members.contains(m));
+        // The local list is lazily loaded; a departed member may never have
+        // been in it, so the leave event itself decides.
+        let someone_left = !up.left_members.is_empty();
+        if room.encrypted {
+            let mut guard = CRYPTO.borrow_mut();
+            if let Some(c) = guard.as_mut() {
+                if someone_left {
+                    // The departed member holds the current key: rotate.
+                    c.drop_outbound(&room.id);
+                } else if !joined.is_empty() && c.outbound_key(&room.id).is_some() {
+                    late_joiners.push((room.id.clone(), joined));
+                }
             }
         }
         room.last_ts = room.last_ts.max(up.last_ts);
@@ -457,6 +549,28 @@ fn sync_now(full: bool) {
         if result.left.iter().any(|id| id == &open) {
             *OPEN_ROOM.borrow_mut() = None;
         }
+    }
+    for (room_id, members) in late_joiners {
+        share_outbound_key(&sess, &room_id, &members);
+    }
+}
+
+/// Queue the live outbound room key (at its current index) for `members`.
+fn share_outbound_key(sess: &Session, room_id: &str, members: &[String]) {
+    let keys = CRYPTO.borrow().as_ref().and_then(|c| {
+        c.outbound_key(room_id)
+            .map(|(sid, skey)| (sid, skey, c.identity_curve25519(), c.identity_ed25519()))
+    });
+    if let Some((session_id, session_key, my_curve, my_ed)) = keys {
+        enqueue_distribution(
+            sess,
+            room_id,
+            members,
+            &session_id,
+            &session_key,
+            &my_curve,
+            &my_ed,
+        );
     }
 }
 
@@ -518,7 +632,9 @@ fn backfill_history(id: &str) {
         if let Some(c) = guard.as_mut() {
             for m in msgs.iter_mut() {
                 if let Some(enc) = m.enc.clone() {
-                    if let Some(plain) = c.decrypt_megolm(&enc.session_id, &enc.ciphertext) {
+                    if let Some(plain) =
+                        c.decrypt_megolm(&enc.session_id, &enc.ciphertext, id, &enc.sender_key)
+                    {
                         m.body = plain;
                         m.encrypted = false;
                         m.enc = None;
@@ -585,15 +701,30 @@ fn ctx_pick(item: u32) {
         CTX_JOIN => {
             // Suppress the auto-poll / list re-render while the T9 is open.
             set_view(View::Composing);
-            ui::push_t9_input(i18n::tr_key("new_room_prompt"), None, 200, ACT_NEW_ROOM_DONE);
+            ui::push_t9_input(
+                i18n::tr_key("new_room_prompt"),
+                None,
+                200,
+                ACT_NEW_ROOM_DONE,
+            );
         }
         CTX_CREATE => {
             set_view(View::Composing);
-            ui::push_t9_input(i18n::tr_key("create_prompt"), None, 200, ACT_CREATE_ROOM_DONE);
+            ui::push_t9_input(
+                i18n::tr_key("create_prompt"),
+                None,
+                200,
+                ACT_CREATE_ROOM_DONE,
+            );
         }
         CTX_INVITE => {
             set_view(View::Composing);
-            ui::push_t9_input(i18n::tr_key("invite_user_prompt"), None, 200, ACT_INVITE_USER_DONE);
+            ui::push_t9_input(
+                i18n::tr_key("invite_user_prompt"),
+                None,
+                200,
+                ACT_INVITE_USER_DONE,
+            );
         }
         CTX_ACCEPT => accept_invite(),
         CTX_REJECT => {
@@ -640,7 +771,11 @@ fn sys_select(item: u32) {
     match item {
         SYS_LOGIN => do_login(),
         SYS_RESET => {
-            ui::push_confirm(i18n::tr_key("reset_confirm"), ui::UI_ICON_ALERT, ACT_SYS_RESET_CONFIRM);
+            ui::push_confirm(
+                i18n::tr_key("reset_confirm"),
+                ui::UI_ICON_ALERT,
+                ACT_SYS_RESET_CONFIRM,
+            );
         }
         _ => {}
     }
@@ -656,13 +791,15 @@ fn do_login() {
     // Drawn synchronously by push_toast before the blocking login HTTP, so the
     // badge shows progress instead of looking frozen.
     ui::push_toast(i18n::tr_key("connecting"), ui::UI_ICON_NONE, 0);
-    // An explicit login always registers a FRESH device (device_id = None) so the
-    // new device publishes the current account identity; a re-login can never land
-    // a reinitialised account on a stale device_id (which broke incoming Olm). The
-    // boot/restore path keeps the stored device_id, so this is not proliferation.
-    match client::login(&cfg.server, &cfg.user, &pass, None) {
+    // The stored device id is reused: the Olm account persists across logins,
+    // and one identity key pair must belong to exactly one device.
+    let device_id = store::load_device_id();
+    match client::login(&cfg.server, &cfg.user, &pass, device_id.as_deref()) {
         Some(r) => {
-            store::save_login(&r.user_id, &r.device_id, &r.token);
+            if store::save_login(&r.user_id, &r.device_id, &r.token).is_err() {
+                ui::push_toast(i18n::tr_key("secret_save_failed"), ui::UI_ICON_ERROR, 2500);
+                return;
+            }
             *SESSION.borrow_mut() = store::load_session();
             // Fresh device: must (re)publish device + one-time keys.
             *UPLOADED.borrow_mut() = false;
@@ -825,9 +962,9 @@ struct OlmTarget {
 }
 
 /// Background room-key distribution job, drained `DIST_CHUNK` devices per tick.
-/// To-device payloads accumulate in `msgs` across chunks and are sent as a single
-/// `sendToDevice` request once all recipients are processed (one round-trip, not
-/// one per chunk).
+/// Each chunk's to-device payloads are collected in `msgs` and sent in one
+/// `sendToDevice` request; a failed send is retried on the next tick up to
+/// [`DIST_MAX_RETRIES`] times.
 struct PendingDist {
     sess: Session,
     room_id: String,
@@ -838,30 +975,25 @@ struct PendingDist {
     targets: Vec<OlmTarget>,
     next: usize,
     msgs: alloc::collections::BTreeMap<String, Vec<String>>,
+    retries: u8,
 }
 
-/// Prepare a background room-key distribution for a freshly created outbound
-/// session: query member devices, claim one-time keys for the ones without an
-/// Olm session, and queue the recipients in [`PENDING_DIST`]. The per-device Olm
-/// establish/encrypt runs later in [`process_distribution`], chunked across ticks
-/// so a single host call never exceeds WAMR's instruction limit.
+/// Prepare a background room-key distribution to `members`: query their
+/// devices, claim one-time keys for the ones without an Olm session, and queue
+/// the recipients in [`PENDING_DIST`]. The per-device Olm establish/encrypt runs
+/// later in [`process_distribution`], chunked across ticks so a single host call
+/// never exceeds WAMR's instruction limit.
 #[allow(clippy::too_many_arguments)]
 fn enqueue_distribution(
     sess: &Session,
     room_id: &str,
+    members: &[String],
     session_id: &str,
     session_key: &str,
     my_curve: &str,
     my_ed: &str,
 ) {
-    let members: Vec<String> = ROOMS
-        .borrow()
-        .iter()
-        .find(|r| r.id == room_id)
-        .map(|r| r.members.clone())
-        .unwrap_or_default();
-
-    let mut devices = match client::keys_query(sess, &members) {
+    let mut devices = match client::keys_query(sess, members) {
         Some(b) => json::parse_keys_query(&b),
         None => Vec::new(),
     };
@@ -892,7 +1024,10 @@ fn enqueue_distribution(
         match client::keys_claim(sess, &build_claim_json(&need)) {
             Some(body) => {
                 let otks = json::parse_keys_claim(&body);
-                log::info(TAG, &alloc::format!("claim: need={} got={}", need.len(), otks.len()));
+                log::info(
+                    TAG,
+                    &alloc::format!("claim: need={} got={}", need.len(), otks.len()),
+                );
                 for otk in otks {
                     if let Some(d) = devices
                         .iter()
@@ -933,12 +1068,17 @@ fn enqueue_distribution(
 
     log::info(
         TAG,
-        &alloc::format!("distribute room={} members={} devices={} chunked", room_id, members.len(), targets.len()),
+        &alloc::format!(
+            "distribute room={} members={} devices={} chunked",
+            room_id,
+            members.len(),
+            targets.len()
+        ),
     );
     if targets.is_empty() {
         return;
     }
-    *PENDING_DIST.borrow_mut() = Some(PendingDist {
+    PENDING_DIST.borrow_mut().push_back(PendingDist {
         sess: sess.clone(),
         room_id: room_id.to_string(),
         session_id: session_id.to_string(),
@@ -948,24 +1088,39 @@ fn enqueue_distribution(
         targets,
         next: 0,
         msgs: alloc::collections::BTreeMap::new(),
+        retries: 0,
     });
 }
 
-/// Drain up to [`DIST_CHUNK`] queued recipients: establish any missing Olm
-/// session and Olm-wrap the room key into the accumulator. Once the last
-/// recipient is processed, send everything in a single `sendToDevice` and clear
-/// the job. No-op when nothing is queued.
+/// Drain up to [`DIST_CHUNK`] queued recipients of the oldest job: establish any
+/// missing Olm session, Olm-wrap the room key and send the chunk in one
+/// `sendToDevice`. The job is dropped once its last recipient is processed.
+/// No-op when nothing is queued.
 fn process_distribution() {
     let mut guard = PENDING_DIST.borrow_mut();
-    let pd = match guard.as_mut() {
+    let pd = match guard.front_mut() {
         Some(p) => p,
         None => return,
     };
     let end = (pd.next + DIST_CHUNK).min(pd.targets.len());
-    log::info(TAG, &alloc::format!("dist tick {}->{}/{} t={}ms", pd.next, end, pd.targets.len(), time::uptime_ms()));
+    log::info(
+        TAG,
+        &alloc::format!(
+            "dist tick {}->{}/{} t={}ms",
+            pd.next,
+            end,
+            pd.targets.len(),
+            time::uptime_ms()
+        ),
+    );
     // Progress on a second line so it fits the toast box (count over total).
     ui::push_toast(
-        &alloc::format!("{}\n{}/{}", i18n::tr_key("distributing"), pd.next, pd.targets.len()),
+        alloc::format!(
+            "{}\n{}/{}",
+            i18n::tr_key("distributing"),
+            pd.next,
+            pd.targets.len()
+        ),
         ui::UI_ICON_NONE,
         0,
     );
@@ -975,7 +1130,7 @@ fn process_distribution() {
         let c = match cg.as_mut() {
             Some(c) => c,
             None => {
-                *guard = None;
+                guard.clear();
                 return;
             }
         };
@@ -1011,7 +1166,11 @@ fn process_distribution() {
                 pd.msgs
                     .entry(t.user_id.clone())
                     .or_default()
-                    .push(alloc::format!("\"{}\":{}", json::json_escape(&t.device_id), content));
+                    .push(alloc::format!(
+                        "\"{}\":{}",
+                        json::json_escape(&t.device_id),
+                        content
+                    ));
             }
         }
     }
@@ -1026,22 +1185,37 @@ fn process_distribution() {
             "{{{}}}",
             pd.msgs
                 .iter()
-                .map(|(u, devs)| alloc::format!("\"{}\":{{{}}}", json::json_escape(u), devs.join(",")))
+                .map(|(u, devs)| alloc::format!(
+                    "\"{}\":{{{}}}",
+                    json::json_escape(u),
+                    devs.join(",")
+                ))
                 .collect::<Vec<_>>()
                 .join(",")
         );
-        client::send_to_device(&pd.sess, &messages, next_txn());
-        pd.msgs.clear();
+        // The Olm ratchets just advanced; persist before the messages leave so
+        // a reload can never re-encrypt with an already used message key.
+        persist_crypto();
+        if client::send_to_device(&pd.sess, &messages, next_txn()) {
+            pd.msgs.clear();
+            pd.retries = 0;
+        } else if pd.retries < DIST_MAX_RETRIES {
+            pd.retries += 1;
+            log::warn(TAG, &alloc::format!("sendToDevice retry {}", pd.retries));
+            return;
+        } else {
+            log::warn(TAG, "sendToDevice gave up on chunk");
+            pd.msgs.clear();
+        }
     }
 
     if pd.next >= pd.targets.len() {
         log::info(TAG, "distribute done");
-        *guard = None;
-        // Persist the Olm sessions established this round so the next boot skips
-        // the per-device X25519 handshake (need=0).
-        persist_crypto();
-        // Replaces the persistent progress toast with an auto-dismissing one.
-        ui::push_toast(i18n::tr_key("distributed"), ui::UI_ICON_SUCCESS, 1500);
+        guard.pop_front();
+        if guard.is_empty() {
+            // Replaces the persistent progress toast with an auto-dismissing one.
+            ui::push_toast(i18n::tr_key("distributed"), ui::UI_ICON_SUCCESS, 1500);
+        }
     }
 }
 
@@ -1064,7 +1238,10 @@ fn e2ee_send(room_id: &str, text: &str) -> bool {
         Some(c) => c.ensure_outbound(room_id),
         None => return false,
     };
-    log::info(TAG, &alloc::format!("e2ee_send room={} new_session={}", room_id, is_new));
+    log::info(
+        TAG,
+        &alloc::format!("e2ee_send room={} new_session={}", room_id, is_new),
+    );
 
     // Encrypt and send the message now (fast); `session_key` was captured at
     // chain index 0 above, so the first message stays decryptable once the key
@@ -1074,7 +1251,11 @@ fn e2ee_send(room_id: &str, text: &str) -> bool {
         json::json_escape(text),
         json::json_escape(room_id),
     );
-    let ciphertext = match CRYPTO.borrow_mut().as_mut().and_then(|c| c.encrypt_megolm(room_id, &event)) {
+    let ciphertext = match CRYPTO
+        .borrow_mut()
+        .as_mut()
+        .and_then(|c| c.encrypt_megolm(room_id, &event))
+    {
         Some(ct) => ct,
         None => return false,
     };
@@ -1097,7 +1278,36 @@ fn e2ee_send(room_id: &str, text: &str) -> bool {
         // Upload the room key to the server-side backup so devices that were
         // offline at send time (or log in later) can restore it.
         backup_room_key(&sess, room_id, &session_id);
-        enqueue_distribution(&sess, room_id, &session_id, &session_key, &my_curve, &my_ed);
+        // The lazily loaded sync state does not carry every member.
+        let members = match client::room_members(&sess, room_id) {
+            Some(fetched) => {
+                // Remember every recipient so a later message from one of
+                // them is not mistaken for a late join.
+                if let Some(room) = ROOMS.borrow_mut().iter_mut().find(|r| r.id == room_id) {
+                    for m in &fetched {
+                        if !room.members.contains(m) {
+                            room.members.push(m.clone());
+                        }
+                    }
+                }
+                fetched
+            }
+            None => ROOMS
+                .borrow()
+                .iter()
+                .find(|r| r.id == room_id)
+                .map(|r| r.members.clone())
+                .unwrap_or_default(),
+        };
+        enqueue_distribution(
+            &sess,
+            room_id,
+            &members,
+            &session_id,
+            &session_key,
+            &my_curve,
+            &my_ed,
+        );
     }
     sent
 }
@@ -1204,7 +1414,11 @@ fn e2ee_reply_blocked() -> bool {
     if !encrypted {
         return false;
     }
-    !CRYPTO.borrow().as_ref().map(|c| c.has_backup()).unwrap_or(false)
+    !CRYPTO
+        .borrow()
+        .as_ref()
+        .map(|c| c.has_backup())
+        .unwrap_or(false)
 }
 
 fn chat_key(key: u32) {
@@ -1231,7 +1445,11 @@ fn chat_key(key: u32) {
         KEY_UP | KEY_DOWN => {
             {
                 let mut s = SCROLL.borrow_mut();
-                *s = if key == KEY_UP { *s + 1 } else { s.saturating_sub(1) };
+                *s = if key == KEY_UP {
+                    *s + 1
+                } else {
+                    s.saturating_sub(1)
+                };
             }
             show_open_chat();
         }
@@ -1267,9 +1485,16 @@ pub extern "C" fn plugin_on_enter() -> i32 {
     set_view(View::RoomList);
     if SESSION.borrow().is_some() {
         init_crypto();
-        let dev = SESSION.borrow().as_ref().map(|s| s.device_id.clone()).unwrap_or_default();
+        let dev = SESSION
+            .borrow()
+            .as_ref()
+            .map(|s| s.device_id.clone())
+            .unwrap_or_default();
         if let Some(c) = CRYPTO.borrow().as_ref() {
-            log::info(TAG, &alloc::format!("identity curve={} device={}", c.identity_curve25519(), dev));
+            log::info(
+                TAG,
+                &alloc::format!("identity curve={} device={}", c.identity_curve25519(), dev),
+            );
         }
         sync_now(true);
         // Publish our device + one-time keys (only when the server is low on
@@ -1290,7 +1515,12 @@ fn open_room_len() -> usize {
         Some(i) => i,
         None => return 0,
     };
-    ROOMS.borrow().iter().find(|r| r.id == id).map(|r| r.messages.len()).unwrap_or(0)
+    ROOMS
+        .borrow()
+        .iter()
+        .find(|r| r.id == id)
+        .map(|r| r.messages.len())
+        .unwrap_or(0)
 }
 
 /// Signature of the visible room-list state (count, names, timestamps, unread /
@@ -1315,14 +1545,14 @@ fn rooms_sig() -> u64 {
 /// host. The chat canvas is redrawn only when new messages actually arrived, so
 /// an idle chat does not trigger a panel refresh every interval.
 #[no_mangle]
-pub extern "C" fn plugin_on_tick(lo: u32, hi: u32) -> i32 {
+pub extern "C" fn plugin_on_tick(uptime_ms: u64) -> i32 {
     // A queued room-key distribution gets this whole tick (chunked Olm work);
     // skip the sync poll so one host call stays under the instruction limit.
-    if PENDING_DIST.borrow().is_some() {
+    if !PENDING_DIST.borrow().is_empty() {
         process_distribution();
         return 0;
     }
-    let now = ((hi as u64) << 32) | (lo as u64);
+    let now = uptime_ms;
     let view = *VIEW.borrow();
     let pollable = matches!(view, View::RoomList | View::Chat) && SESSION.borrow().is_some();
     if pollable && now.wrapping_sub(*LAST_POLL_MS.borrow()) >= POLL_INTERVAL_MS {
@@ -1355,11 +1585,14 @@ pub extern "C" fn plugin_on_exit() -> i32 {
             store::save_sync_token(&s.next_batch);
         }
     }
+    // Olm sessions may have ratcheted since the last snapshot (an aborted
+    // distribution); a stale snapshot would reuse message keys.
+    persist_crypto();
     ROOMS.borrow_mut().clear();
     *OPEN_ROOM.borrow_mut() = None;
     *MENU_TARGET.borrow_mut() = None;
     *PENDING_DELETE.borrow_mut() = None;
-    *PENDING_DIST.borrow_mut() = None;
+    PENDING_DIST.borrow_mut().clear();
     *CRYPTO.borrow_mut() = None;
     set_view(View::RoomList);
     0
@@ -1447,7 +1680,9 @@ pub extern "C" fn plugin_on_action(action_id: u32, _position: u32, user_data: u3
         ACT_SYS_PASS_DONE => {
             if user_data == 1 {
                 if let Some(t) = ui::consume_input_text(128) {
-                    store::save_password(&t);
+                    if store::save_password(&t).is_err() {
+                        ui::push_toast(i18n::tr_key("secret_save_failed"), ui::UI_ICON_ERROR, 2500);
+                    }
                 }
             }
             let cfg = store::load_config();
@@ -1467,8 +1702,11 @@ pub extern "C" fn plugin_on_action(action_id: u32, _position: u32, user_data: u3
         ACT_SYS_KEY_DONE => {
             if user_data == 1 {
                 if let Some(t) = ui::consume_input_text(120) {
-                    store::save_recovery_key(t.trim());
-                    init_crypto();
+                    if store::save_recovery_key(t.trim()).is_ok() {
+                        init_crypto();
+                    } else {
+                        ui::push_toast(i18n::tr_key("secret_save_failed"), ui::UI_ICON_ERROR, 2500);
+                    }
                 }
             }
             let cfg = store::load_config();
@@ -1476,6 +1714,9 @@ pub extern "C" fn plugin_on_action(action_id: u32, _position: u32, user_data: u3
             set_view(View::System);
         }
         ACT_SYS_RESET_CONFIRM if user_data == 1 => {
+            if let Some(s) = SESSION.borrow().clone() {
+                let _ = client::logout(&s);
+            }
             store::reset_all();
             *SESSION.borrow_mut() = None;
             *CRYPTO.borrow_mut() = None;

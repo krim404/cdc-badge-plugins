@@ -3,9 +3,9 @@
 
 use crate::actions::*;
 use crate::model::{Config, Room};
-use cdc_badge_plugin::{canvas, i18n, ui};
 use alloc::format;
 use alloc::vec::Vec;
+use cdc_badge_plugin::{canvas, i18n, ui};
 
 /// Builtin 6x8 font cell width (px) used to wrap chat lines to the body width.
 const CHAR_W: usize = 6;
@@ -18,7 +18,11 @@ pub fn render_room_list(rooms: &[Room], configured: bool) {
         .on_select(ACT_ROOM_SELECT)
         .on_menu(ACT_ROOM_MENU);
     if rooms.is_empty() {
-        let key = if configured { "no_rooms" } else { "not_configured" };
+        let key = if configured {
+            "no_rooms"
+        } else {
+            "not_configured"
+        };
         b = b.item(i18n::tr_key(key), 0, ui::UI_ICON_INFO);
     } else {
         // Display newest-first, but key each item by its storage index in `rooms`
@@ -76,21 +80,49 @@ pub fn open_room_menu(invited: bool) {
 pub fn open_chat_menu() {
     ui::ContextMenuBuilder::new(i18n::tr_meta("name"))
         .on_select(ACT_ROOM_CTX_PICK)
-        .item(i18n::tr_key("menu_invite"), CTX_INVITE, ui::UI_ICON_ARROW_RIGHT)
+        .item(
+            i18n::tr_key("menu_invite"),
+            CTX_INVITE,
+            ui::UI_ICON_ARROW_RIGHT,
+        )
         .push();
 }
 
 /// Render the System config list. `replace` swaps the current system list in
 /// place (after editing a field); `false` pushes it as a new screen.
 pub fn render_system(cfg: &Config, replace: bool) {
-    let user = if cfg.user.is_empty() { "-" } else { cfg.user.as_str() };
-    let server = if cfg.server.is_empty() { "-" } else { cfg.server.as_str() };
+    let user = if cfg.user.is_empty() {
+        "-"
+    } else {
+        cfg.user.as_str()
+    };
+    let server = if cfg.server.is_empty() {
+        "-"
+    } else {
+        cfg.server.as_str()
+    };
     let b = ui::ListBuilder::new(i18n::tr_key("sys_title"))
         .on_select(ACT_SYS_SELECT)
-        .item(format!("{}: {}", i18n::tr_key("sys_user"), user), SYS_USER, ui::UI_ICON_MALE)
-        .item(format!("{}: ****", i18n::tr_key("sys_pass")), SYS_PASS, ui::UI_ICON_PARAGRAPH)
-        .item(format!("{}: {}", i18n::tr_key("sys_server"), server), SYS_SRV, ui::UI_ICON_ANGLE)
-        .item(format!("{}: ****", i18n::tr_key("sys_key")), SYS_KEY, ui::UI_ICON_DIAMOND)
+        .item(
+            format!("{}: {}", i18n::tr_key("sys_user"), user),
+            SYS_USER,
+            ui::UI_ICON_MALE,
+        )
+        .item(
+            format!("{}: ****", i18n::tr_key("sys_pass")),
+            SYS_PASS,
+            ui::UI_ICON_PARAGRAPH,
+        )
+        .item(
+            format!("{}: {}", i18n::tr_key("sys_server"), server),
+            SYS_SRV,
+            ui::UI_ICON_ANGLE,
+        )
+        .item(
+            format!("{}: ****", i18n::tr_key("sys_key")),
+            SYS_KEY,
+            ui::UI_ICON_DIAMOND,
+        )
         .item(i18n::tr_key("sys_login"), SYS_LOGIN, ui::UI_ICON_PLAY)
         .item(i18n::tr_key("sys_reset"), SYS_RESET, ui::UI_ICON_ALERT);
     if replace {
@@ -106,16 +138,31 @@ pub fn render_system(cfg: &Config, replace: bool) {
 pub fn open_field_editor(field: u32, cfg: &Config) -> bool {
     match field {
         SYS_USER => {
-            ui::push_t9_input(i18n::tr_key("sys_user"), Some(&cfg.user), 128, ACT_SYS_USER_DONE);
+            ui::push_t9_input(
+                i18n::tr_key("sys_user"),
+                Some(&cfg.user),
+                128,
+                ACT_SYS_USER_DONE,
+            );
             true
         }
         SYS_PASS => {
             let pass = crate::store::load_password().unwrap_or_default();
-            ui::push_password(i18n::tr_key("sys_pass"), Some(&pass), 128, ACT_SYS_PASS_DONE);
+            ui::push_password(
+                i18n::tr_key("sys_pass"),
+                Some(&pass),
+                128,
+                ACT_SYS_PASS_DONE,
+            );
             true
         }
         SYS_SRV => {
-            ui::push_t9_input(i18n::tr_key("sys_server"), Some(&cfg.server), 200, ACT_SYS_SRV_DONE);
+            ui::push_t9_input(
+                i18n::tr_key("sys_server"),
+                Some(&cfg.server),
+                200,
+                ACT_SYS_SRV_DONE,
+            );
             true
         }
         SYS_KEY => {

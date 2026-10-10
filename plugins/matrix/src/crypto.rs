@@ -16,8 +16,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 use vodozemac::megolm::{
-    ExportedSessionKey, GroupSession, InboundGroupSession, InboundGroupSessionPickle, MegolmMessage,
-    SessionConfig, SessionKey,
+    ExportedSessionKey, GroupSession, InboundGroupSession, InboundGroupSessionPickle,
+    MegolmMessage, SessionConfig, SessionKey, SessionOrdering,
 };
 use vodozemac::olm::{
     Account, AccountPickle, OlmMessage, Session, SessionConfig as OlmSessionConfig, SessionPickle,
@@ -34,9 +34,34 @@ use crate::json::json_escape;
 /// RAM and rotate on reboot.
 #[derive(Serialize, Deserialize, Default)]
 struct CryptoState {
-    inbound: BTreeMap<String, InboundGroupSessionPickle>,
+    inbound: BTreeMap<String, InboundEntryPickle>,
     #[serde(default)]
     olm: BTreeMap<String, Vec<SessionPickle>>,
+}
+
+/// Persisted form of [`InboundEntry`]. The session fields are flattened so a
+/// snapshot written without bindings still loads (empty binding = unbound).
+#[derive(Serialize, Deserialize)]
+struct InboundEntryPickle {
+    #[serde(flatten)]
+    session: InboundGroupSessionPickle,
+    #[serde(default)]
+    room_id: String,
+    #[serde(default)]
+    sender_key: String,
+}
+
+/// An inbound Megolm session bound to the room and sender device it was
+/// delivered for. An empty binding means unknown and is not enforced.
+struct InboundEntry {
+    session: InboundGroupSession,
+    room_id: String,
+    sender_key: String,
+}
+
+/// True unless both sides are known and differ.
+fn binding_matches(held: &str, offered: &str) -> bool {
+    held.is_empty() || offered.is_empty() || held == offered
 }
 
 /// Bitcoin base58 alphabet, used by the Matrix recovery/security key encoding.
@@ -158,9 +183,9 @@ const MAX_OLM_SESSIONS_PER_PEER: usize = 3;
 pub struct Crypto {
     account: Account,
     backup: Option<PkDecryption>,
-    inbound: BTreeMap<String, InboundGroupSession>, // session_id -> inbound megolm
-    outbound: BTreeMap<String, GroupSession>,       // room_id -> outbound megolm
-    olm: BTreeMap<String, Vec<Session>>,            // device curve25519 -> olm sessions
+    inbound: BTreeMap<String, InboundEntry>, // session_id -> inbound megolm
+    outbound: BTreeMap<String, GroupSession>, // room_id -> outbound megolm
+    olm: BTreeMap<String, Vec<Session>>,     // device curve25519 -> olm sessions
 }
 
 impl Crypto {
@@ -194,7 +219,20 @@ impl Crypto {
     /// not have to re-fetch the whole key backup.
     pub fn export_state(&self) -> Vec<u8> {
         let state = CryptoState {
-            inbound: self.inbound.iter().map(|(k, v)| (k.clone(), v.pickle())).collect(),
+            inbound: self
+                .inbound
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        InboundEntryPickle {
+                            session: v.session.pickle(),
+                            room_id: v.room_id.clone(),
+                            sender_key: v.sender_key.clone(),
+                        },
+                    )
+                })
+                .collect(),
             olm: self
                 .olm
                 .iter()
@@ -209,11 +247,20 @@ impl Crypto {
     pub fn import_state(&mut self, bytes: &[u8]) {
         if let Ok(state) = serde_json::from_slice::<CryptoState>(bytes) {
             for (id, pickle) in state.inbound {
-                self.inbound.insert(id, InboundGroupSession::from_pickle(pickle));
+                self.inbound.insert(
+                    id,
+                    InboundEntry {
+                        session: InboundGroupSession::from_pickle(pickle.session),
+                        room_id: pickle.room_id,
+                        sender_key: pickle.sender_key,
+                    },
+                );
             }
             for (curve, pickles) in state.olm {
-                self.olm
-                    .insert(curve, pickles.into_iter().map(Session::from_pickle).collect());
+                self.olm.insert(
+                    curve,
+                    pickles.into_iter().map(Session::from_pickle).collect(),
+                );
             }
         }
     }
@@ -235,7 +282,7 @@ impl Crypto {
     /// armed. Lets a device that was offline at send time restore the room key.
     pub fn backup_session_blob(&self, session_id: &str) -> Option<(String, String, String)> {
         let backup = self.backup.as_ref()?;
-        let inbound = self.inbound.get(session_id)?;
+        let inbound = &self.inbound.get(session_id)?.session;
         let exported = inbound.export_at_first_known_index().to_base64();
         let session_data = format!(
             "{{\"algorithm\":\"m.megolm.v1.aes-sha2\",\"forwarding_curve25519_key_chain\":[],\"sender_claimed_keys\":{{\"ed25519\":\"{ed}\"}},\"sender_key\":\"{ck}\",\"session_key\":\"{sk}\"}}",
@@ -243,7 +290,9 @@ impl Crypto {
             ck = json_escape(&self.identity_curve25519()),
             sk = json_escape(&exported),
         );
-        let message = PkEncryption::from(backup).encrypt(session_data.as_bytes()).ok()?;
+        let message = PkEncryption::from(backup)
+            .encrypt(session_data.as_bytes())
+            .ok()?;
         Some((
             cdc_badge_plugin::crypto::base64_encode(&message.ciphertext).ok()?,
             cdc_badge_plugin::crypto::base64_encode(&message.mac).ok()?,
@@ -265,9 +314,53 @@ impl Crypto {
 
     // --- Receive (backup) -------------------------------------------------
 
+    /// Add or upgrade an inbound session. Rejected when the key does not
+    /// produce `session_id`, or when a session of that id is already bound to
+    /// another room or sender. An existing session is replaced only by a
+    /// connected one with a lower first known index.
+    fn insert_inbound(
+        &mut self,
+        session_id: &str,
+        mut session: InboundGroupSession,
+        room_id: &str,
+        sender_key: &str,
+    ) -> bool {
+        if session.session_id() != session_id {
+            return false;
+        }
+        let Some(held) = self.inbound.get_mut(session_id) else {
+            self.inbound.insert(
+                session_id.to_string(),
+                InboundEntry {
+                    session,
+                    room_id: room_id.to_string(),
+                    sender_key: sender_key.to_string(),
+                },
+            );
+            return true;
+        };
+        if !binding_matches(&held.room_id, room_id)
+            || !binding_matches(&held.sender_key, sender_key)
+        {
+            return false;
+        }
+        if held.session.compare(&mut session) != SessionOrdering::Worse {
+            return false;
+        }
+        held.session = session;
+        if held.room_id.is_empty() {
+            held.room_id = room_id.to_string();
+        }
+        if held.sender_key.is_empty() {
+            held.sender_key = sender_key.to_string();
+        }
+        true
+    }
+
     /// Decrypt one backed-up session blob and import its Megolm session.
     pub fn import_backup_session(
         &mut self,
+        room_id: &str,
         session_id: &str,
         ciphertext: &str,
         mac: &str,
@@ -285,7 +378,7 @@ impl Crypto {
             Ok(p) => p,
             Err(_) => return false,
         };
-        let key_b64 = match session_key_from_backup(&plain) {
+        let (key_b64, sender_key) = match session_key_from_backup(&plain) {
             Some(k) => k,
             None => return false,
         };
@@ -293,19 +386,33 @@ impl Crypto {
             Ok(e) => e,
             Err(_) => return false,
         };
-        self.inbound.insert(
-            session_id.to_string(),
-            InboundGroupSession::import(&exported, SessionConfig::version_1()),
-        );
-        true
+        let session = InboundGroupSession::import(&exported, SessionConfig::version_1());
+        self.insert_inbound(session_id, session, room_id, &sender_key)
     }
 
-    /// Decrypt a Megolm timeline event; returns the plaintext message body.
-    pub fn decrypt_megolm(&mut self, session_id: &str, ciphertext_b64: &str) -> Option<String> {
-        let session = self.inbound.get_mut(session_id)?;
+    /// Decrypt a Megolm timeline event of `room_id` sent by `sender_key`;
+    /// returns the plaintext message body. `None` when the session is bound to
+    /// a different room or sender, or the plaintext names another room.
+    pub fn decrypt_megolm(
+        &mut self,
+        session_id: &str,
+        ciphertext_b64: &str,
+        room_id: &str,
+        sender_key: &str,
+    ) -> Option<String> {
+        let entry = self.inbound.get_mut(session_id)?;
+        if !binding_matches(&entry.room_id, room_id)
+            || !binding_matches(&entry.sender_key, sender_key)
+        {
+            return None;
+        }
         let message = MegolmMessage::from_base64(ciphertext_b64).ok()?;
-        let decrypted = session.decrypt(&message).ok()?;
-        body_from_event(&decrypted.plaintext)
+        let decrypted = entry.session.decrypt(&message).ok()?;
+        let v: serde_json::Value = serde_json::from_slice(&decrypted.plaintext).ok()?;
+        if v.get("room_id").and_then(|r| r.as_str()) != Some(room_id) {
+            return None;
+        }
+        Some(v.get("content")?.get("body")?.as_str()?.to_string())
     }
 
     // --- Send -------------------------------------------------------------
@@ -358,7 +465,9 @@ impl Crypto {
 
     /// True when at least one Olm session with this device exists.
     pub fn has_olm_session(&self, device_curve25519: &str) -> bool {
-        self.olm.get(device_curve25519).map_or(false, |v| !v.is_empty())
+        self.olm
+            .get(device_curve25519)
+            .is_some_and(|v| !v.is_empty())
     }
 
     /// Establish an outbound Olm session to a device from its claimed OTK,
@@ -391,7 +500,11 @@ impl Crypto {
 
     /// Olm-encrypt `plaintext` for a device; returns `(message_type, body_b64)`.
     /// The base64 of the ciphertext is done by the host (offloads it from wasm).
-    pub fn olm_encrypt(&mut self, device_curve25519: &str, plaintext: &str) -> Option<(u8, String)> {
+    pub fn olm_encrypt(
+        &mut self,
+        device_curve25519: &str,
+        plaintext: &str,
+    ) -> Option<(u8, String)> {
         // Reuse this device's current send session (the most recently established).
         let session = self.olm.get_mut(device_curve25519)?.last_mut()?;
         let message = session.encrypt(plaintext.as_bytes()).ok()?;
@@ -404,7 +517,12 @@ impl Crypto {
     /// pre-key message (`msg_type == 0`) creates a fresh inbound Olm session; a
     /// normal message (`msg_type == 1`) advances the existing one. Returns the
     /// decrypted to-device event JSON, or `None` on any failure.
-    pub fn olm_decrypt(&mut self, sender_curve25519: &str, msg_type: u8, body_b64: &str) -> Option<String> {
+    pub fn olm_decrypt(
+        &mut self,
+        sender_curve25519: &str,
+        msg_type: u8,
+        body_b64: &str,
+    ) -> Option<String> {
         let sender = Curve25519PublicKey::from_base64(sender_curve25519).ok()?;
         let bytes = cdc_badge_plugin::crypto::base64_decode(body_b64).ok()?;
         let message = OlmMessage::from_parts(msg_type as usize, &bytes).ok()?;
@@ -434,17 +552,35 @@ impl Crypto {
         None
     }
 
-    /// Import a Megolm room key (received via to-device) under its `session_id`
-    /// so timeline events encrypted with it become decryptable. Returns false on
-    /// a malformed key.
-    pub fn import_room_key(&mut self, session_id: &str, session_key_b64: &str) -> bool {
+    /// Import a Megolm room key received via to-device from the device
+    /// `sender_key`, so timeline events encrypted with it become decryptable.
+    /// Returns false on a malformed or rejected key (see [`Self::insert_inbound`]).
+    pub fn import_room_key(
+        &mut self,
+        session_id: &str,
+        session_key_b64: &str,
+        room_id: &str,
+        sender_key: &str,
+    ) -> bool {
         let key = match SessionKey::from_base64(session_key_b64) {
             Ok(k) => k,
             Err(_) => return false,
         };
-        self.inbound
-            .insert(session_id.to_string(), InboundGroupSession::new(&key, SessionConfig::version_1()));
-        true
+        let session = InboundGroupSession::new(&key, SessionConfig::version_1());
+        self.insert_inbound(session_id, session, room_id, sender_key)
+    }
+
+    /// Forget the outbound session of a room, so the next message starts a
+    /// fresh one that is distributed to the current members only.
+    pub fn drop_outbound(&mut self, room_id: &str) {
+        self.outbound.remove(room_id);
+    }
+
+    /// `(session_id, session_key_b64)` of the live outbound session of a room
+    /// at its current index, for sharing with members who joined later.
+    pub fn outbound_key(&self, room_id: &str) -> Option<(String, String)> {
+        let session = self.outbound.get(room_id)?;
+        Some((session.session_id(), session.session_key().to_base64()))
     }
 
     /// Get or create the outbound Megolm session for a room; returns
@@ -463,7 +599,15 @@ impl Crypto {
             // (and persist/back up) its own messages; recipients import the same
             // key via the to-device room-key distribution.
             let inbound = InboundGroupSession::new(&session_key, SessionConfig::version_1());
-            self.inbound.insert(session_id.clone(), inbound);
+            let own_curve = self.account.curve25519_key().to_base64();
+            self.inbound.insert(
+                session_id.clone(),
+                InboundEntry {
+                    session: inbound,
+                    room_id: room_id.to_string(),
+                    sender_key: own_curve,
+                },
+            );
         }
         (session_id, session_key.to_base64(), is_new)
     }
@@ -475,11 +619,20 @@ impl Crypto {
     }
 }
 
-fn session_key_from_backup(plain: &[u8]) -> Option<String> {
+/// `(session_key, sender_key)` from decrypted backup `session_data`; the sender
+/// key is empty when the backup entry carries none.
+fn session_key_from_backup(plain: &[u8]) -> Option<(String, String)> {
     let v: serde_json::Value = serde_json::from_slice(plain).ok()?;
-    Some(v.get("session_key")?.as_str()?.to_string())
+    let session_key = v.get("session_key")?.as_str()?.to_string();
+    let sender_key = v
+        .get("sender_key")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+    Some((session_key, sender_key))
 }
 
+#[cfg(test)]
 fn body_from_event(plain: &[u8]) -> Option<String> {
     let v: serde_json::Value = serde_json::from_slice(plain).ok()?;
     Some(v.get("content")?.get("body")?.as_str()?.to_string())
@@ -607,7 +760,8 @@ mod tests {
         let session_id = group.session_id();
         let exported = InboundGroupSession::new(&group.session_key(), SessionConfig::version_1())
             .export_at_first_known_index();
-        let event = br#"{"type":"m.room.message","content":{"msgtype":"m.text","body":"hi badge"}}"#;
+        let event =
+            br#"{"type":"m.room.message","content":{"msgtype":"m.text","body":"hi badge"}}"#;
         let ciphertext = group.encrypt(event).to_base64();
 
         let mut sessions: BTreeMap<String, InboundGroupSession> = BTreeMap::new();
@@ -616,8 +770,112 @@ mod tests {
             InboundGroupSession::import(&exported, SessionConfig::version_1()),
         );
         let message = MegolmMessage::from_base64(&ciphertext).unwrap();
-        let plain = sessions.get_mut(&session_id).unwrap().decrypt(&message).unwrap();
-        assert_eq!(body_from_event(&plain.plaintext).as_deref(), Some("hi badge"));
+        let plain = sessions
+            .get_mut(&session_id)
+            .unwrap()
+            .decrypt(&message)
+            .unwrap();
+        assert_eq!(
+            body_from_event(&plain.plaintext).as_deref(),
+            Some("hi badge")
+        );
+        assert_eq!(session_id, sessions[&session_id].session_id());
+    }
+
+    const ROOM: &str = "!r:s";
+    const SENDER: &str = "senderCurve";
+
+    fn room_event(body: &str, room: &str) -> String {
+        format!(
+            r#"{{"type":"m.room.message","room_id":"{}","content":{{"msgtype":"m.text","body":"{}"}}}}"#,
+            room, body
+        )
+    }
+
+    #[test]
+    fn import_room_key_rejects_foreign_session_id() {
+        let mut c = Crypto::new(Account::new());
+        let group = GroupSession::new(SessionConfig::version_1());
+        let key = group.session_key().to_base64();
+        assert!(!c.import_room_key("victimSessionId", &key, ROOM, SENDER));
+        assert_eq!(c.session_count(), 0);
+        assert!(c.import_room_key(&group.session_id(), &key, ROOM, SENDER));
+        assert_eq!(c.session_count(), 1);
+    }
+
+    #[test]
+    fn import_room_key_never_replaces_with_unconnected_or_worse_session() {
+        let mut c = Crypto::new(Account::new());
+        let mut group = GroupSession::new(SessionConfig::version_1());
+        let sid = group.session_id();
+        let first = group.session_key().to_base64();
+        assert!(c.import_room_key(&sid, &first, ROOM, SENDER));
+
+        // Same session at a later index: worse, must not replace index 0.
+        group.encrypt(b"x");
+        let later = group.session_key().to_base64();
+        assert!(!c.import_room_key(&sid, &later, ROOM, SENDER));
+
+        // Same id, other room or sender: rejected.
+        assert!(!c.import_room_key(&sid, &first, "!other:s", SENDER));
+        assert!(!c.import_room_key(&sid, &first, ROOM, "otherCurve"));
+
+        // The held index-0 key still decrypts the first message.
+        let mut group2 = GroupSession::new(SessionConfig::version_1());
+        let sid2 = group2.session_id();
+        let k0 = group2.session_key().to_base64();
+        let ct0 = group2
+            .encrypt(room_event("first", ROOM).as_bytes())
+            .to_base64();
+        let k1 = group2.session_key().to_base64();
+        // Later key first, then the earlier one: the earlier (better) replaces it.
+        assert!(c.import_room_key(&sid2, &k1, ROOM, SENDER));
+        assert!(c.decrypt_megolm(&sid2, &ct0, ROOM, SENDER).is_none());
+        assert!(c.import_room_key(&sid2, &k0, ROOM, SENDER));
+        assert_eq!(
+            c.decrypt_megolm(&sid2, &ct0, ROOM, SENDER).as_deref(),
+            Some("first")
+        );
+    }
+
+    #[test]
+    fn decrypt_megolm_enforces_room_and_sender_binding() {
+        let mut c = Crypto::new(Account::new());
+        let mut group = GroupSession::new(SessionConfig::version_1());
+        let sid = group.session_id();
+        assert!(c.import_room_key(&sid, &group.session_key().to_base64(), ROOM, SENDER));
+
+        let ct = group.encrypt(room_event("hi", ROOM).as_bytes()).to_base64();
+        assert_eq!(c.decrypt_megolm(&sid, &ct, "!other:s", SENDER), None);
+        assert_eq!(c.decrypt_megolm(&sid, &ct, ROOM, "otherCurve"), None);
+        assert_eq!(
+            c.decrypt_megolm(&sid, &ct, ROOM, SENDER).as_deref(),
+            Some("hi")
+        );
+
+        // Plaintext naming another room is a replay, even if the binding fits.
+        let replay = group
+            .encrypt(room_event("x", "!other:s").as_bytes())
+            .to_base64();
+        assert_eq!(c.decrypt_megolm(&sid, &replay, ROOM, SENDER), None);
+    }
+
+    #[test]
+    fn state_snapshot_without_bindings_still_loads() {
+        let mut c = Crypto::new(Account::new());
+        let group = GroupSession::new(SessionConfig::version_1());
+        let sid = group.session_id();
+        let pickle =
+            InboundGroupSession::new(&group.session_key(), SessionConfig::version_1()).pickle();
+        let legacy = serde_json::json!({ "inbound": { sid.clone(): pickle } });
+        c.import_state(&serde_json::to_vec(&legacy).unwrap());
+        assert_eq!(c.session_count(), 1);
+        assert_eq!(c.inbound[&sid].room_id, "");
+
+        let bytes = c.export_state();
+        let mut restored = Crypto::new(Account::new());
+        restored.import_state(&bytes);
+        assert_eq!(restored.session_count(), 1);
     }
 
     #[test]
@@ -638,7 +896,8 @@ mod tests {
         // JSON -> from_pickle and still decrypts.
         let mut group = GroupSession::new(SessionConfig::version_1());
         let inbound = InboundGroupSession::new(&group.session_key(), SessionConfig::version_1());
-        let event = br#"{"type":"m.room.message","content":{"msgtype":"m.text","body":"persisted"}}"#;
+        let event =
+            br#"{"type":"m.room.message","content":{"msgtype":"m.text","body":"persisted"}}"#;
         let ct = group.encrypt(event).to_base64();
 
         let bytes = serde_json::to_vec(&inbound.pickle()).unwrap();
@@ -647,7 +906,10 @@ mod tests {
 
         let msg = MegolmMessage::from_base64(&ct).unwrap();
         let dec = restored.decrypt(&msg).unwrap();
-        assert_eq!(body_from_event(&dec.plaintext).as_deref(), Some("persisted"));
+        assert_eq!(
+            body_from_event(&dec.plaintext).as_deref(),
+            Some("persisted")
+        );
     }
 
     #[test]

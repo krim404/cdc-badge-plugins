@@ -43,8 +43,16 @@ pub fn urlencode(s: &str) -> String {
             }
             _ => {
                 out.push('%');
-                out.push(char::from_digit((b >> 4) as u32, 16).unwrap().to_ascii_uppercase());
-                out.push(char::from_digit((b & 0xf) as u32, 16).unwrap().to_ascii_uppercase());
+                out.push(
+                    char::from_digit((b >> 4) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+                out.push(
+                    char::from_digit((b & 0xf) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
             }
         }
     }
@@ -71,8 +79,16 @@ pub fn parse_login(body: &str) -> Option<LoginResult> {
     let v: Value = serde_json::from_str(body).ok()?;
     let token = v.get("access_token")?.as_str()?.to_string();
     Some(LoginResult {
-        user_id: v.get("user_id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-        device_id: v.get("device_id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        user_id: v
+            .get("user_id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        device_id: v
+            .get("device_id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         token,
     })
 }
@@ -86,6 +102,8 @@ pub struct RoomUpdate {
     pub messages: Vec<Message>,
     /// Joined member MXIDs seen in this delta.
     pub members: Vec<String>,
+    /// MXIDs whose membership changed away from `join` in this delta.
+    pub left_members: Vec<String>,
     /// Joined `(mxid, displayname)` pairs seen in this delta; display name is
     /// empty when the member event carried none.
     pub member_names: Vec<(String, String)>,
@@ -135,7 +153,10 @@ fn name_from_events(events: &[Value]) -> Option<String> {
                 }
             }
         } else if ty == "m.room.canonical_alias" && found.is_none() {
-            if let Some(a) = content.and_then(|c| c.get("alias")).and_then(|a| a.as_str()) {
+            if let Some(a) = content
+                .and_then(|c| c.get("alias"))
+                .and_then(|a| a.as_str())
+            {
                 if !a.is_empty() {
                     found = Some(a.to_string());
                 }
@@ -176,6 +197,7 @@ fn parse_room(id: &str, room: &Value) -> RoomUpdate {
     let mut encrypted = false;
     let mut messages = Vec::new();
     let mut members = Vec::new();
+    let mut left_members = Vec::new();
     let mut member_names: Vec<(String, String)> = Vec::new();
     for e in state.iter().chain(timeline.iter()) {
         let ty = e.get("type").and_then(|t| t.as_str());
@@ -184,10 +206,19 @@ fn parse_room(id: &str, room: &Value) -> RoomUpdate {
         }
         if ty == Some("m.room.member") {
             let content = e.get("content");
-            let joined =
-                content.and_then(|c| c.get("membership")).and_then(|m| m.as_str()) == Some("join");
+            let membership = content
+                .and_then(|c| c.get("membership"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("");
+            let joined = membership == "join";
+            let gone = membership == "leave" || membership == "ban";
             if let Some(uid) = e.get("state_key").and_then(|s| s.as_str()) {
-                if joined && !uid.is_empty() {
+                if uid.is_empty() {
+                    continue;
+                }
+                // Events are in order, so the last membership seen wins.
+                if joined {
+                    left_members.retain(|m| m != uid);
                     if !members.iter().any(|m| m == uid) {
                         members.push(uid.to_string());
                     }
@@ -198,6 +229,11 @@ fn parse_room(id: &str, room: &Value) -> RoomUpdate {
                         .to_string();
                     if !member_names.iter().any(|(u, _)| u == uid) {
                         member_names.push((uid.to_string(), dn));
+                    }
+                } else if gone {
+                    members.retain(|m| m != uid);
+                    if !left_members.iter().any(|m| m == uid) {
+                        left_members.push(uid.to_string());
                     }
                 }
             }
@@ -211,7 +247,10 @@ fn parse_room(id: &str, room: &Value) -> RoomUpdate {
     let mut last_ts = 0u64;
     for e in timeline {
         let ty = e.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        let ts = e.get("origin_server_ts").and_then(|t| t.as_u64()).unwrap_or(0);
+        let ts = e
+            .get("origin_server_ts")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
         if ty == "m.room.message" || ty == "m.room.encrypted" {
             last_ts = last_ts.max(ts);
         }
@@ -223,7 +262,17 @@ fn parse_room(id: &str, room: &Value) -> RoomUpdate {
         }
     }
 
-    RoomUpdate { id: id.to_string(), name, encrypted, messages, members, member_names, last_ts, invited: false }
+    RoomUpdate {
+        id: id.to_string(),
+        name,
+        encrypted,
+        messages,
+        members,
+        left_members,
+        member_names,
+        last_ts,
+        invited: false,
+    }
 }
 
 /// Map a single timeline event to a display [`Message`], or `None` for events
@@ -235,7 +284,9 @@ fn parse_message_event(e: &Value) -> Option<Message> {
     let content = e.get("content");
     match ty {
         "m.room.message" => {
-            let msgtype = content.and_then(|c| c.get("msgtype")).and_then(|m| m.as_str());
+            let msgtype = content
+                .and_then(|c| c.get("msgtype"))
+                .and_then(|m| m.as_str());
             if msgtype != Some("m.text") {
                 return None;
             }
@@ -244,20 +295,39 @@ fn parse_message_event(e: &Value) -> Option<Message> {
                 .and_then(|b| b.as_str())
                 .unwrap_or("")
                 .to_string();
-            Some(Message { sender, body, encrypted: false, enc: None })
+            Some(Message {
+                sender,
+                body,
+                encrypted: false,
+                enc: None,
+            })
         }
         "m.room.encrypted" => {
             let enc = match (
-                content.and_then(|c| c.get("session_id")).and_then(|s| s.as_str()),
-                content.and_then(|c| c.get("ciphertext")).and_then(|s| s.as_str()),
+                content
+                    .and_then(|c| c.get("session_id"))
+                    .and_then(|s| s.as_str()),
+                content
+                    .and_then(|c| c.get("ciphertext"))
+                    .and_then(|s| s.as_str()),
             ) {
                 (Some(sid), Some(ct)) => Some(EncInfo {
                     session_id: sid.to_string(),
                     ciphertext: ct.to_string(),
+                    sender_key: content
+                        .and_then(|c| c.get("sender_key"))
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                 }),
                 _ => None,
             };
-            Some(Message { sender, body: String::new(), encrypted: true, enc })
+            Some(Message {
+                sender,
+                body: String::new(),
+                encrypted: true,
+                enc,
+            })
         }
         _ => None,
     }
@@ -325,10 +395,30 @@ fn parse_invite(id: &str, room: &Value) -> RoomUpdate {
         encrypted,
         messages: Vec::new(),
         members,
+        left_members: Vec::new(),
         member_names,
         last_ts: 0,
         invited: true,
     }
+}
+
+/// Joined member MXIDs from a `GET /rooms/{id}/members?membership=join` body.
+pub fn parse_members(body: &str) -> Vec<String> {
+    let v: Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    v.get("chunk")
+        .and_then(|c| c.as_array())
+        .map(|events| {
+            events
+                .iter()
+                .filter_map(|e| e.get("state_key").and_then(|s| s.as_str()))
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Extract every `(key_id, ciphertext, iv, mac)` entry from an
@@ -440,6 +530,7 @@ pub fn parse_keys_claim(body: &str) -> Vec<ClaimedOtk> {
 
 /// One encrypted Megolm session entry from `GET /room_keys/keys`.
 pub struct BackupSession {
+    pub room_id: String,
     pub session_id: String,
     pub ciphertext: String,
     pub mac: String,
@@ -456,7 +547,7 @@ pub fn parse_backup(body: &str) -> Vec<BackupSession> {
         Some(r) => r,
         None => return out,
     };
-    for room in rooms.values() {
+    for (room_id, room) in rooms {
         let sessions = match room.get("sessions").and_then(|s| s.as_object()) {
             Some(s) => s,
             None => continue,
@@ -471,6 +562,7 @@ pub fn parse_backup(body: &str) -> Vec<BackupSession> {
                 (get("ciphertext"), get("mac"), get("ephemeral"))
             {
                 out.push(BackupSession {
+                    room_id: room_id.clone(),
                     session_id: session_id.clone(),
                     ciphertext,
                     mac,
@@ -484,7 +576,11 @@ pub fn parse_backup(body: &str) -> Vec<BackupSession> {
 
 pub fn parse_sync(body: &str) -> Option<SyncResult> {
     let v: Value = serde_json::from_str(body).ok()?;
-    let next_batch = v.get("next_batch").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    let next_batch = v
+        .get("next_batch")
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_string();
     let mut rooms = Vec::new();
     if let Some(join) = v
         .get("rooms")
@@ -520,7 +616,13 @@ pub fn parse_sync(body: &str) -> Option<SyncResult> {
             left.push(id.clone());
         }
     }
-    Some(SyncResult { next_batch, rooms, to_device, otk_count, left })
+    Some(SyncResult {
+        next_batch,
+        rooms,
+        to_device,
+        otk_count,
+        left,
+    })
 }
 
 /// Extract Olm-encrypted to-device payloads (`m.room.encrypted` /
@@ -536,8 +638,7 @@ fn parse_to_device(v: &Value) -> Vec<ToDeviceOlm> {
             Some(c) => c,
             None => continue,
         };
-        if content.get("algorithm").and_then(|a| a.as_str())
-            != Some("m.olm.v1.curve25519-aes-sha2")
+        if content.get("algorithm").and_then(|a| a.as_str()) != Some("m.olm.v1.curve25519-aes-sha2")
         {
             continue;
         }
@@ -562,9 +663,16 @@ fn parse_to_device(v: &Value) -> Vec<ToDeviceOlm> {
     out
 }
 
-/// Extract `(session_id, session_key)` from a decrypted `m.room_key` to-device
-/// event, or `None` if it is not a Megolm room key.
-pub fn parse_room_key(plain: &str) -> Option<(String, String)> {
+/// A Megolm room key from a decrypted `m.room_key` to-device event.
+pub struct RoomKey {
+    pub room_id: String,
+    pub session_id: String,
+    pub session_key: String,
+}
+
+/// Extract the room key from a decrypted `m.room_key` to-device event, or
+/// `None` if it is not a Megolm room key.
+pub fn parse_room_key(plain: &str) -> Option<RoomKey> {
     let v: Value = serde_json::from_str(plain).ok()?;
     if v.get("type")?.as_str()? != "m.room_key" {
         return None;
@@ -573,9 +681,11 @@ pub fn parse_room_key(plain: &str) -> Option<(String, String)> {
     if content.get("algorithm")?.as_str()? != "m.megolm.v1.aes-sha2" {
         return None;
     }
-    let sid = content.get("session_id")?.as_str()?.to_string();
-    let skey = content.get("session_key")?.as_str()?.to_string();
-    Some((sid, skey))
+    Some(RoomKey {
+        room_id: content.get("room_id")?.as_str()?.to_string(),
+        session_id: content.get("session_id")?.as_str()?.to_string(),
+        session_key: content.get("session_key")?.as_str()?.to_string(),
+    })
 }
 
 #[cfg(test)]
@@ -662,14 +772,62 @@ mod tests {
             "state":{"events":[{"type":"m.room.member","state_key":"@krim:matrix.krim.dev","content":{"membership":"join","displayname":"Krim"}}]},
             "timeline":{"events":[]}
         }}}}"#;
-        assert_eq!(parse_sync(body).unwrap().rooms[0].name.as_deref(), Some("Krim"));
+        assert_eq!(
+            parse_sync(body).unwrap().rooms[0].name.as_deref(),
+            Some("Krim")
+        );
 
         // No display name -> fall back to the localpart.
         let body2 = r#"{"next_batch":"s","rooms":{"join":{"!dm:s":{
             "summary":{"m.heroes":["@krim:matrix.krim.dev"]},
             "timeline":{"events":[]}
         }}}}"#;
-        assert_eq!(parse_sync(body2).unwrap().rooms[0].name.as_deref(), Some("krim"));
+        assert_eq!(
+            parse_sync(body2).unwrap().rooms[0].name.as_deref(),
+            Some("krim")
+        );
+    }
+
+    #[test]
+    fn parse_sync_tracks_members_leaving() {
+        let body = r#"{"next_batch":"s","rooms":{"join":{"!r:s":{
+            "state":{"events":[
+                {"type":"m.room.member","state_key":"@a:s","content":{"membership":"join"}},
+                {"type":"m.room.member","state_key":"@b:s","content":{"membership":"join"}}
+            ]},
+            "timeline":{"events":[
+                {"type":"m.room.member","state_key":"@b:s","content":{"membership":"leave"}}
+            ]}
+        }}}}"#;
+        let room = &parse_sync(body).unwrap().rooms[0];
+        assert_eq!(room.members, alloc::vec!["@a:s".to_string()]);
+        assert_eq!(room.left_members, alloc::vec!["@b:s".to_string()]);
+    }
+
+    #[test]
+    fn parse_members_reads_state_keys() {
+        let body =
+            r#"{"chunk":[{"type":"m.room.member","state_key":"@a:s"},{"state_key":"@b:s"}]}"#;
+        assert_eq!(
+            parse_members(body),
+            alloc::vec!["@a:s".to_string(), "@b:s".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_room_key_requires_room_id() {
+        let plain = r#"{"type":"m.room_key","content":{"algorithm":"m.megolm.v1.aes-sha2","room_id":"!r:s","session_id":"S","session_key":"K"}}"#;
+        let k = parse_room_key(plain).unwrap();
+        assert_eq!(
+            (
+                k.room_id.as_str(),
+                k.session_id.as_str(),
+                k.session_key.as_str()
+            ),
+            ("!r:s", "S", "K")
+        );
+        let no_room = r#"{"type":"m.room_key","content":{"algorithm":"m.megolm.v1.aes-sha2","session_id":"S","session_key":"K"}}"#;
+        assert!(parse_room_key(no_room).is_none());
     }
 
     #[test]
@@ -679,6 +837,7 @@ mod tests {
         }}}}"#;
         let sessions = parse_backup(body);
         assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].room_id, "!r:s");
         assert_eq!(sessions[0].session_id, "SID1");
         assert_eq!(sessions[0].ciphertext, "C");
         assert_eq!(sessions[0].mac, "M");
