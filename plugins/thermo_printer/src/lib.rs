@@ -1,8 +1,9 @@
 //! \file
-//! \brief Thermal cat-printer plugin: prints vCards, free QR codes and vFAT
-//!        files on BLE thermal printers (GB01/GB02/GB03/GT01/YT01/MX05/06/08/
-//!        10/MXTP), and provides the `thermo_print` external feature so other
-//!        plugins can print raw rasters via `use_ext_feature`.
+//! \brief Thermal cat-printer plugin: prints vCards, free QR codes, vFAT
+//!        files, received JPEGs and network/serial jobs on BLE cat printers
+//!        (GB01/GB02/GB03/GT01/YT01/MX05/06/08/10/MXTP/X6/X6h/SC05), and
+//!        provides the `thermo_print` external feature so other plugins can
+//!        print rasters or plain text via `use_ext_feature`.
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
@@ -21,7 +22,7 @@ mod plugin {
     use alloc::string::{String, ToString};
     use alloc::{format, vec::Vec};
     use cdc_badge_plugin::{
-        ble, feature, fs, i18n, image, lifecycle, log, net, nvs, plugin_main, qr,
+        ble, feature, fs, i18n, image, lifecycle, log, msg, net, nvs, plugin_main, qr,
         surface::Surface,
         time,
         ui::{self, ContextMenuBuilder, ListBuilder, SliderBuilder},
@@ -56,6 +57,8 @@ mod plugin {
     const ACT_NOTIFY: u32 = 22;
     const ACT_WRITE_DONE: u32 = 23;
     const ACT_NET: u32 = 24; // inbound print-server connection
+    const ACT_MSG_JPEG: u32 = 25; // JPEG received over the badge message bus
+    const ACT_SLIDER_SPEED: u32 = 26;
 
     // Top menu rows.
     const TOP_PRINT: u32 = 0;
@@ -74,11 +77,13 @@ mod plugin {
 
     // Settings submenu rows.
     const SET_ENERGY: u32 = 0;
-    const SET_CHUNK: u32 = 1;
-    const SET_FEED: u32 = 2;
-    const SET_PORT: u32 = 3;
-    const SET_FONT: u32 = 4;
-    const SET_FORGET: u32 = 5;
+    const SET_SPEED: u32 = 1;
+    const SET_CHUNK: u32 = 2;
+    const SET_FEED: u32 = 3;
+    const SET_PORT: u32 = 4;
+    const SET_FONT: u32 = 5;
+    const SET_RLE: u32 = 6;
+    const SET_FORGET: u32 = 7;
 
     // vCard print modes (context-menu item ids).
     const MODE_TEXT: u32 = 0;
@@ -92,6 +97,8 @@ mod plugin {
 
     const NVS_PRINTER: &str = "printer_addr";
     const NVS_ENERGY: &str = "energy";
+    const NVS_SPEED: &str = "speed";
+    const NVS_RLE: &str = "rle"; // 1 = send compressible rows as 0xBF
     const NVS_CHUNK: &str = "chunk";
     const NVS_FEED: &str = "feed";
     const NVS_PORT: &str = "port";
@@ -100,9 +107,13 @@ mod plugin {
 
     const DEFAULT_PRINT_PORT: u16 = 9100;
 
-    /// vFAT print-file size cap: the file buffer must fit the 256 KiB linear
-    /// memory alongside the decoded raster and the framed BLE job.
+    /// vFAT print-file size cap, bounding the file buffer, the decoded raster
+    /// and the framed BLE job together.
     const FILE_MAX: usize = 128 * 1024;
+    /// Height cap for decoded images and raster jobs, in printer rows.
+    const MAX_ROWS: usize = raster::MAX_HEIGHT_PX as usize;
+    /// Rows framed per refill of the send buffer while streaming a job.
+    const ROWS_PER_REFILL: usize = 32;
     /// Network print-job cap (PJ header + payload), same memory rationale.
     const MAX_JOB: usize = FILE_MAX;
     /// Serial `PLUGIN CMD` line cap (text-only channel).
@@ -116,10 +127,16 @@ mod plugin {
     const RESCAN_INTERVAL_MS: u64 = 3000;
     const CONNECT_TIMEOUT_MS: u64 = 10_000;
     const DISCOVER_TIMEOUT_MS: u64 = 8_000;
-    /// With-response gate every N write-without-response chunks.
+    /// With-response gate every N write-without-response chunks (only when
+    /// the TX characteristic supports writes with response).
     const GATE_EVERY: u32 = 8;
-    /// Chunks pushed per tick between gates.
-    const BURST_PER_TICK: u32 = 2;
+    /// Longest wait for the printer's Ready after a BufferFull notification.
+    const PAUSE_MAX_MS: u64 = 10_000;
+    /// Default BLE chunk size in bytes.
+    const DEFAULT_CHUNK: u32 = 180;
+    /// Per-read timeout and whole-connection budget for one network job.
+    const NET_READ_TIMEOUT_MS: u32 = 250;
+    const NET_CONN_DEADLINE_MS: u64 = 5_000;
     /// Text page height cap in pixels (surface cap is 64 KiB = 1365 rows).
     const PAGE_MAX_ROWS: usize = 1200;
     const LINE_H: i16 = 20;
@@ -144,10 +161,21 @@ mod plugin {
             since: u64,
         },
         Sending {
-            data: Vec<u8>,
+            ras: Ras,
+            /// Next raster row to frame into `buf`.
+            next_row: usize,
+            /// The closing frames have been queued.
+            finished: bool,
+            feed_steps: u16,
+            rle: bool,
+            /// Framed bytes waiting to go out, consumed from `off`.
+            buf: Vec<u8>,
             off: usize,
+            /// Waiting for the write-complete action of a gated write.
             gated: bool,
             since_gate: u32,
+            /// Set while the printer reports BufferFull.
+            paused_since: Option<u64>,
         },
     }
 
@@ -156,8 +184,6 @@ mod plugin {
         Nothing,
         /// More text pages to render + print.
         NextPage,
-        /// Report the ext-feature job result to the caller.
-        ReportJob,
     }
 
     struct State {
@@ -174,6 +200,8 @@ mod plugin {
         job_active: bool,
         conn: u32,
         tx_handle: u16,
+        /// GATT properties of the TX characteristic (`ble::PROP_*`).
+        tx_props: u8,
         rx_handle: u16,
         last_poll_ms: u64,
         last_scan_ms: u64,
@@ -206,6 +234,7 @@ mod plugin {
                 job_active: false,
                 conn: 0,
                 tx_handle: 0,
+                tx_props: 0,
                 rx_handle: 0,
                 last_poll_ms: 0,
                 last_scan_ms: 0,
@@ -224,7 +253,7 @@ mod plugin {
 
     #[inline]
     fn s() -> &'static mut State {
-        unsafe { &mut *(&raw mut STATE) }
+        unsafe { &mut *core::ptr::addr_of_mut!(STATE) }
     }
 
     // --- Settings ---------------------------------------------------------------
@@ -235,11 +264,23 @@ mod plugin {
             .unwrap_or(proto::DEFAULT_ENERGY)
     }
 
+    fn speed() -> u8 {
+        nvs::get_u32(NVS_SPEED)
+            .map(|v| v as u8)
+            .unwrap_or(proto::DEFAULT_SPEED)
+    }
+
+    fn rle_enabled() -> bool {
+        nvs::get_u32(NVS_RLE).unwrap_or(0) == 1
+    }
+
+    /// Bytes per BLE write: the configured chunk, capped at the payload the
+    /// negotiated MTU allows (`get_mtu` already excludes the ATT header).
     fn chunk_size() -> usize {
-        let cfg = nvs::get_u32(NVS_CHUNK).unwrap_or(180) as usize;
+        let cfg = nvs::get_u32(NVS_CHUNK).unwrap_or(DEFAULT_CHUNK) as usize;
         let mtu = ble::get_mtu(s().conn) as usize;
-        if mtu > 3 {
-            cfg.min(mtu - 3)
+        if mtu > 0 {
+            cfg.min(mtu)
         } else {
             cfg
         }
@@ -323,7 +364,8 @@ mod plugin {
         })
     }
 
-    /// Render up to one page of lines onto a surface; leftover lines stay queued.
+    /// Render up to one page of lines onto a surface; leftover lines stay
+    /// queued. Returns `None` only on a rendering failure.
     fn compose_lines_page(lines: &mut Vec<layout::VcardLine>) -> Option<Ras> {
         if lines.is_empty() {
             return None;
@@ -331,43 +373,27 @@ mod plugin {
         // Measure with a scratch surface to word-wrap against the real fonts.
         let scratch = Surface::create(proto::WIDTH_PX, 8).ok()?;
         let max_w = (proto::WIDTH_PX as i16 - 2 * MARGIN) as u16;
-        let mut rendered: Vec<(bool, String)> = Vec::new();
-        let mut y: i16 = MARGIN;
-        let mut consumed = 0usize;
-        while let Some(line) = lines.get(consumed) {
-            let headline = line.headline;
-            let (font, h) = if headline {
-                (2u8, HEAD_H)
+        let line_h = |headline: bool| -> i32 {
+            if headline {
+                HEAD_H as i32
             } else {
-                (body_font(), body_line_h())
-            };
-            scratch.set_font(font).ok()?;
-            let wrapped = layout::wrap_text(&line.text, max_w, &|t| {
+                body_line_h() as i32
+            }
+        };
+        let wrap = |headline: bool, text: &str| -> Vec<String> {
+            let font = if headline { 2u8 } else { body_font() };
+            if scratch.set_font(font).is_err() {
+                return Vec::new();
+            }
+            layout::wrap_text(text, max_w, &|t| {
                 scratch.measure_text(t).map(|(w, _)| w).unwrap_or(u16::MAX)
-            });
-            let needed = (wrapped.len().max(1) as i16) * h;
-            // Blank source lines are paragraph separators. Consume them on the
-            // current page even at the bottom, otherwise the visual gap moves to
-            // the top of the next page and the paragraph break disappears.
-            if y + needed > (PAGE_MAX_ROWS as i16) && !wrapped.is_empty() {
-                break; // page full; rest goes to the next page
-            }
-            if wrapped.is_empty() {
-                // Blank source line: keep the paragraph gap on the page.
-                rendered.push((headline, String::new()));
-                y += h;
-            } else {
-                for w in wrapped {
-                    rendered.push((headline, w));
-                    y += h;
-                }
-            }
-            consumed += 1;
-        }
-        lines.drain(..consumed);
+            })
+        };
+        let (rendered, y) =
+            layout::paginate(lines, MARGIN as i32, PAGE_MAX_ROWS as i32, &line_h, &wrap);
         drop(scratch);
 
-        let height = (y + MARGIN).max(8) as u16;
+        let height = (y + MARGIN as i32).clamp(8, u16::MAX as i32) as u16;
         let surf = Surface::create(proto::WIDTH_PX, height).ok()?;
         let mut cy: i16 = MARGIN;
         for (headline, text) in &rendered {
@@ -420,6 +446,26 @@ mod plugin {
             }
             _ => None,
         }
+    }
+
+    /// Decode a PNG/JPEG into a print-width raster, refusing images whose
+    /// scaled height exceeds [`MAX_ROWS`].
+    fn render_image(data: &[u8]) -> Option<Ras> {
+        let (w, h) = image::info(data)?;
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let scaled_h = (h as usize * proto::WIDTH_PX as usize).div_ceil(w as usize);
+        if scaled_h > MAX_ROWS {
+            log::warn(TAG, &format!("image too tall: {} rows", scaled_h));
+            return None;
+        }
+        let img = image::render(data, proto::WIDTH_PX).ok()?;
+        Some(Ras {
+            bits: img.data,
+            stride: img.stride_bytes as usize,
+            height: img.height_px as usize,
+        })
     }
 
     // --- Output routing ----------------------------------------------------------
@@ -477,10 +523,30 @@ mod plugin {
 
     // --- Printer link ------------------------------------------------------------
 
+    /// Drop everything queued for printing and report a failed job.
+    fn clear_queue() {
+        s().pending = None;
+        s().pending_lines.clear();
+        s().after = AfterPrint::Nothing;
+        finish_job(feature::STATUS_ERROR);
+    }
+
+    /// Forget the printer link so the next print reconnects from scratch.
+    fn reset_link() {
+        if s().conn != 0 {
+            let _ = ble::disconnect(s().conn);
+        }
+        let _ = ble::on_write_complete(0);
+        s().conn = 0;
+        s().tx_handle = 0;
+        s().tx_props = 0;
+        s().rx_handle = 0;
+    }
+
     fn connect_or_scan() {
         if !ble::is_enabled() {
             ui::push_message(i18n::tr_key("ble_off"), ui::UI_ICON_ERROR, 2500);
-            finish_job(feature::STATUS_ERROR);
+            clear_queue();
             return;
         }
         if s().conn != 0 && s().tx_handle != 0 {
@@ -500,7 +566,7 @@ mod plugin {
     fn start_scan(auto_pick: bool) {
         if ble::scan_start(SCAN_MS).is_err() {
             ui::push_message(i18n::tr_key("scan_failed"), ui::UI_ICON_ERROR, 2500);
-            finish_job(feature::STATUS_ERROR);
+            clear_queue();
             return;
         }
         s().found.clear();
@@ -563,9 +629,8 @@ mod plugin {
                     ui::push_message(i18n::tr_key("no_printer"), ui::UI_ICON_ERROR, 2500);
                 }
             }
-            s().pending = None;
             s().drive = Drive::Idle;
-            finish_job(feature::STATUS_ERROR);
+            clear_queue();
             return;
         }
 
@@ -602,10 +667,12 @@ mod plugin {
     fn on_discovered() {
         let chars = ble::consume_discovery(8).unwrap_or_default();
         s().tx_handle = 0;
+        s().tx_props = 0;
         s().rx_handle = 0;
         for c in &chars {
             if c.uuid == proto::TX_UUID_LE {
                 s().tx_handle = c.value_handle;
+                s().tx_props = c.properties;
             } else if c.uuid == proto::RX_UUID_LE {
                 s().rx_handle = c.value_handle;
             }
@@ -626,35 +693,28 @@ mod plugin {
             s().drive = Drive::Idle;
             return;
         };
-        let data = proto::build_job(
-            &ras.bits,
-            ras.stride,
-            ras.height,
-            energy(),
-            proto::DEFAULT_QUALITY,
-            feed_steps(),
-        );
-        log::info(
-            TAG,
-            &format!("printing {} rows, {} bytes", ras.height, data.len()),
-        );
+        log::info(TAG, &format!("printing {} rows", ras.height));
         ui::push_toast(i18n::tr_key("printing"), ui::UI_ICON_PLAY, 2000);
         s().drive = Drive::Sending {
-            data,
+            buf: proto::job_setup(energy(), speed()),
+            ras,
+            next_row: 0,
+            finished: false,
+            feed_steps: feed_steps(),
+            rle: rle_enabled(),
             off: 0,
             gated: false,
             since_gate: 0,
+            paused_since: None,
         };
     }
 
     fn fail_print(why: &str) {
         log::warn(TAG, &format!("print failed: {}", why));
         ui::push_message(i18n::tr_key("print_failed"), ui::UI_ICON_ERROR, 2500);
-        s().pending = None;
-        s().pending_lines.clear();
         s().drive = Drive::Idle;
-        s().after = AfterPrint::Nothing;
-        finish_job(feature::STATUS_ERROR);
+        reset_link();
+        clear_queue();
     }
 
     /// Report the ext-feature result when a job drove this print.
@@ -666,10 +726,10 @@ mod plugin {
     }
 
     fn on_send_complete() {
-        match core::mem::replace(&mut s().after, AfterPrint::Nothing) {
-            AfterPrint::NextPage => {
-                let mut lines = core::mem::take(&mut s().pending_lines);
-                if let Some(ras) = compose_lines_page(&mut lines) {
+        if let AfterPrint::NextPage = core::mem::replace(&mut s().after, AfterPrint::Nothing) {
+            let mut lines = core::mem::take(&mut s().pending_lines);
+            match compose_lines_page(&mut lines) {
+                Some(ras) => {
                     s().pending_lines = lines;
                     s().after = if s().pending_lines.is_empty() {
                         AfterPrint::Nothing
@@ -680,55 +740,135 @@ mod plugin {
                     begin_send();
                     return;
                 }
-                ui::push_toast(i18n::tr_key("printed"), ui::UI_ICON_SUCCESS, 2000);
-            }
-            AfterPrint::ReportJob => {
-                ui::push_toast(i18n::tr_key("printed"), ui::UI_ICON_SUCCESS, 2000);
-                finish_job(feature::STATUS_DONE);
-            }
-            AfterPrint::Nothing => {
-                ui::push_toast(i18n::tr_key("printed"), ui::UI_ICON_SUCCESS, 2000);
+                None if !lines.is_empty() => {
+                    fail_print("page render");
+                    return;
+                }
+                None => {}
             }
         }
+        ui::push_toast(i18n::tr_key("printed"), ui::UI_ICON_SUCCESS, 2000);
+        finish_job(feature::STATUS_DONE);
         s().drive = Drive::Idle;
     }
 
-    /// Push queued job bytes: BURST_PER_TICK chunks per tick, one gated
-    /// with-response write every GATE_EVERY chunks for flow control.
+    /// Refill an exhausted send buffer with the next rows or the closing
+    /// frames. Returns `false` once the whole job has been consumed.
+    fn refill_send_buffer() -> bool {
+        let Drive::Sending {
+            ras,
+            next_row,
+            finished,
+            feed_steps,
+            rle,
+            buf,
+            off,
+            ..
+        } = &mut s().drive
+        else {
+            return false;
+        };
+        loop {
+            if *off < buf.len() {
+                return true;
+            }
+            *off = 0;
+            if *next_row < ras.height {
+                let to = (*next_row + ROWS_PER_REFILL).min(ras.height);
+                *buf = proto::job_rows(&ras.bits, ras.stride, *next_row, to, *rle);
+                *next_row = to;
+            } else if !*finished {
+                *buf = proto::job_finish(*feed_steps);
+                *finished = true;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    /// Push one chunk of job bytes per tick. Flow control: the printer's
+    /// BufferFull/Ready notifications pause and resume the stream; when the
+    /// TX characteristic also accepts writes with response, every GATE_EVERY
+    /// chunks one such write waits for its completion.
     fn pump_send() {
         let conn = s().conn;
         let chunk = chunk_size().max(20);
         let tx = s().tx_handle;
-        let Drive::Sending {
-            data,
-            off,
-            gated,
-            since_gate,
-        } = &mut s().drive
-        else {
-            return;
-        };
-        if *gated {
-            return; // waiting for the write-complete action
+        let props = s().tx_props;
+        let now = s().now_ms;
+        enum Step {
+            Wait,
+            Done,
+            Write { end: usize, with_response: bool },
         }
-        for _ in 0..BURST_PER_TICK {
-            if *off >= data.len() {
-                on_send_complete();
-                return;
+        let waiting = match &s().drive {
+            Drive::Sending {
+                gated,
+                paused_since,
+                ..
+            } => {
+                *gated || paused_since.is_some_and(|since| now.saturating_sub(since) < PAUSE_MAX_MS)
             }
-            let end = (*off + chunk).min(data.len());
-            let with_response = *since_gate + 1 >= GATE_EVERY || end == data.len();
-            if ble::write_char(conn, tx, &data[*off..end], with_response).is_err() {
-                fail_print("write");
-                return;
+            _ => return,
+        };
+        let step = if waiting {
+            Step::Wait
+        } else if !refill_send_buffer() {
+            Step::Done
+        } else {
+            match &mut s().drive {
+                Drive::Sending {
+                    buf,
+                    off,
+                    since_gate,
+                    paused_since,
+                    finished,
+                    ..
+                } => {
+                    *paused_since = None;
+                    let end = (*off + chunk).min(buf.len());
+                    let last = *finished && end == buf.len();
+                    let can_no_rsp = props & ble::PROP_WRITE_NO_RSP != 0 || props == 0;
+                    let can_rsp = props & ble::PROP_WRITE != 0;
+                    let gate_due = *since_gate + 1 >= GATE_EVERY || last;
+                    Step::Write {
+                        end,
+                        with_response: !can_no_rsp || (can_rsp && gate_due),
+                    }
+                }
+                _ => return,
             }
-            *off = end;
-            if with_response {
-                *gated = true;
-                *since_gate = 0;
-                return;
+        };
+        match step {
+            Step::Wait => {}
+            Step::Done => on_send_complete(),
+            Step::Write { end, with_response } => {
+                let written = match &s().drive {
+                    Drive::Sending { buf, off, .. } => {
+                        ble::write_char(conn, tx, &buf[*off..end], with_response).is_ok()
+                    }
+                    _ => return,
+                };
+                if !written {
+                    fail_print("write");
+                    return;
+                }
+                if let Drive::Sending {
+                    off,
+                    gated,
+                    since_gate,
+                    ..
+                } = &mut s().drive
+                {
+                    *off = end;
+                    if with_response {
+                        *gated = true;
+                        *since_gate = 0;
+                    } else {
+                        *since_gate += 1;
+                    }
+                }
             }
-            *since_gate += 1;
         }
     }
 
@@ -852,16 +992,9 @@ mod plugin {
             ui::push_message(i18n::tr_key("read_failed"), ui::UI_ICON_ERROR, 2500);
             return;
         };
-        match image::render(&data, proto::WIDTH_PX) {
-            Ok(img) => start_print_ui(
-                Ras {
-                    bits: img.data,
-                    stride: img.stride_bytes as usize,
-                    height: img.height_px as usize,
-                },
-                AfterPrint::Nothing,
-            ),
-            Err(_) => ui::push_message(i18n::tr_key("img_failed"), ui::UI_ICON_ERROR, 2500),
+        match render_image(&data) {
+            Some(ras) => start_print_ui(ras, AfterPrint::Nothing),
+            None => ui::push_message(i18n::tr_key("img_failed"), ui::UI_ICON_ERROR, 2500),
         }
     }
 
@@ -871,13 +1004,20 @@ mod plugin {
         } else {
             i18n::tr_key("font_normal")
         };
+        let rle_label = if rle_enabled() {
+            i18n::tr_key("rle_on")
+        } else {
+            i18n::tr_key("rle_off")
+        };
         ContextMenuBuilder::new(i18n::tr_key("m_settings"))
             .on_select(ACT_SETTINGS)
             .item(i18n::tr_key("s_energy"), SET_ENERGY, ui::UI_ICON_INFO)
+            .item(i18n::tr_key("s_speed"), SET_SPEED, ui::UI_ICON_INFO)
             .item(i18n::tr_key("s_chunk"), SET_CHUNK, ui::UI_ICON_INFO)
             .item(i18n::tr_key("s_feed"), SET_FEED, ui::UI_ICON_INFO)
             .item(i18n::tr_key("s_port"), SET_PORT, ui::UI_ICON_INFO)
             .item(font_label, SET_FONT, ui::UI_ICON_INFO)
+            .item(rle_label, SET_RLE, ui::UI_ICON_INFO)
             .item(i18n::tr_key("s_forget"), SET_FORGET, ui::UI_ICON_ERROR)
             .push();
     }
@@ -950,17 +1090,10 @@ mod plugin {
         };
         match job.kind {
             wire::TYPE_TEXT => print_text(core::str::from_utf8(job.payload).unwrap_or("")),
-            wire::TYPE_IMAGE => match image::render(job.payload, proto::WIDTH_PX) {
-                // start_print is false while a print runs: the client gets ERR.
-                Ok(img) => start_print(
-                    Ras {
-                        bits: img.data,
-                        stride: img.stride_bytes as usize,
-                        height: img.height_px as usize,
-                    },
-                    AfterPrint::Nothing,
-                ),
-                Err(_) => false,
+            // start_print is false while a print runs: the client gets ERR.
+            wire::TYPE_IMAGE => match render_image(job.payload) {
+                Some(ras) => start_print(ras, AfterPrint::Nothing),
+                None => false,
             },
             wire::TYPE_RASTER => match raster::parse(job.payload) {
                 Some(j) => start_print(
@@ -988,6 +1121,9 @@ mod plugin {
     /// Render + print a text block (word-wrapped, paginated). Shared by the
     /// text wire job, the serial command and file printing.
     fn print_text(text: &str) -> bool {
+        if !drive_idle() {
+            return false;
+        }
         let mut lines: Vec<layout::VcardLine> = text
             .lines()
             .map(|l| layout::VcardLine {
@@ -1008,13 +1144,12 @@ mod plugin {
     }
 
     /// Read one PJ frame from an accepted print-server connection and print
-    /// it. Bounded on every axis: 1 s per read, 10 s per connection, jobs
-    /// capped at [`MAX_JOB`] - a slow or hostile client cannot stall the badge
-    /// UI or balloon the receive buffer.
+    /// it. Bounded on every axis: [`NET_READ_TIMEOUT_MS`] per read,
+    /// [`NET_CONN_DEADLINE_MS`] per connection, jobs capped at [`MAX_JOB`] -
+    /// a slow or hostile client cannot stall the badge UI or balloon the
+    /// receive buffer.
     fn serve_net_job(stream: &cdc_badge_plugin::socket::TcpStream) {
-        const READ_TIMEOUT_MS: u32 = 1000;
-        const CONN_DEADLINE_MS: u64 = 10_000;
-        let deadline = time::uptime_ms() + CONN_DEADLINE_MS;
+        let deadline = time::uptime_ms() + NET_CONN_DEADLINE_MS;
         let mut buf: Vec<u8> = Vec::new();
         let mut chunk = [0u8; 2048];
         // Full frame size, known once the header has been received.
@@ -1023,7 +1158,7 @@ mod plugin {
             if time::uptime_ms() >= deadline {
                 break; // frame still incomplete: the parse below answers ERR
             }
-            match stream.read(&mut chunk, READ_TIMEOUT_MS) {
+            match stream.read(&mut chunk, NET_READ_TIMEOUT_MS) {
                 Ok(0) => break, // EOF
                 Ok(n) => {
                     buf.extend_from_slice(&chunk[..n]);
@@ -1037,6 +1172,7 @@ mod plugin {
                             return;
                         }
                         let total = wire::PJ_HEADER_LEN + len;
+                        buf.truncate(total);
                         buf.reserve(total - buf.len());
                         want = Some(total);
                     }
@@ -1074,6 +1210,12 @@ mod plugin {
     pub extern "C" fn plugin_init() -> i32 {
         if let Err(e) = feature::register_provider("thermo_print", ACT_JOB) {
             log::warn(TAG, &format!("provider registration failed: {:?}", e));
+        }
+        if let Err(e) = msg::register_handler("image/jpeg", ACT_MSG_JPEG) {
+            log::warn(
+                TAG,
+                &format!("message handler registration failed: {:?}", e),
+            );
         }
         // Bring the print server back up after a reboot / autoload if enabled.
         restore_server();
@@ -1120,18 +1262,9 @@ mod plugin {
             // accepted): leaving the UI must not kill it - let it finish.
             return 0;
         }
-        if s().conn != 0 {
-            let _ = ble::disconnect(s().conn);
-            s().conn = 0;
-            s().tx_handle = 0;
-            s().rx_handle = 0;
-        }
-        let _ = ble::on_write_complete(0);
+        reset_link();
         s().drive = Drive::Idle;
-        s().pending = None;
-        s().pending_lines.clear();
-        s().after = AfterPrint::Nothing;
-        finish_job(feature::STATUS_ERROR);
+        clear_queue();
         0
     }
 
@@ -1200,7 +1333,13 @@ mod plugin {
             ACT_PRINTER_MENU => {
                 s().scan_menu = false;
                 match user_data {
-                    PT_SCAN => start_scan(false),
+                    PT_SCAN => {
+                        if drive_idle() {
+                            start_scan(false);
+                        } else {
+                            ui::push_message(i18n::tr_key("busy"), ui::UI_ICON_ERROR, 2500);
+                        }
+                    }
                     PT_SERVER => {
                         toggle_server();
                         // Refresh the list in place: server row shows the new
@@ -1211,21 +1350,30 @@ mod plugin {
                 }
             }
             ACT_NET => {
-                // Inbound print-server connections: read one framed job each.
-                while let Some(stream) = net::accept() {
+                // One connection per action; the host re-fires the action
+                // while more connections wait.
+                if let Some(stream) = net::accept() {
                     serve_net_job(&stream);
                 }
             }
-            ACT_T9_QR => {
-                if user_data == 1 {
-                    if let Some(text) = ui::consume_input_text(128) {
-                        let payload = match url::normalize(&text) {
-                            url::Normalized::Url(u) => u,
-                            url::Normalized::Text(t) => t,
-                        };
-                        if !payload.is_empty() {
-                            compose_and_offer_qr(&payload);
+            ACT_MSG_JPEG => {
+                if let Some(received) = msg::consume(msg::PAYLOAD_MAX) {
+                    match render_image(&received.data) {
+                        Some(ras) => start_print_ui(ras, AfterPrint::Nothing),
+                        None => {
+                            ui::push_message(i18n::tr_key("img_failed"), ui::UI_ICON_ERROR, 2500)
                         }
+                    }
+                }
+            }
+            ACT_T9_QR if user_data == 1 => {
+                if let Some(text) = ui::consume_input_text(128) {
+                    let payload = match url::normalize(&text) {
+                        url::Normalized::Url(u) => u,
+                        url::Normalized::Text(t) => t,
+                    };
+                    if !payload.is_empty() {
+                        compose_and_offer_qr(&payload);
                     }
                 }
             }
@@ -1285,14 +1433,20 @@ mod plugin {
             }
             ACT_SETTINGS => match user_data {
                 SET_ENERGY => SliderBuilder::new(i18n::tr_key("s_energy"))
-                    .range(0x1000, 0xFFFF)
+                    .range(proto::MIN_ENERGY as i32, proto::MAX_ENERGY as i32)
                     .initial(energy() as i32)
-                    .step(0x800)
+                    .step(2000)
                     .on_save(ACT_SLIDER_ENERGY)
+                    .push(),
+                SET_SPEED => SliderBuilder::new(i18n::tr_key("s_speed"))
+                    .range(proto::MIN_SPEED as i32, proto::MAX_SPEED as i32)
+                    .initial(speed() as i32)
+                    .step(4)
+                    .on_save(ACT_SLIDER_SPEED)
                     .push(),
                 SET_CHUNK => SliderBuilder::new(i18n::tr_key("s_chunk"))
                     .range(20, 244)
-                    .initial(nvs::get_u32(NVS_CHUNK).unwrap_or(180) as i32)
+                    .initial(nvs::get_u32(NVS_CHUNK).unwrap_or(DEFAULT_CHUNK) as i32)
                     .step(10)
                     .unit("B")
                     .on_save(ACT_SLIDER_CHUNK)
@@ -1318,8 +1472,12 @@ mod plugin {
                     };
                     let _ = nvs::set_u32(NVS_FONT, next);
                     ui::push_toast(i18n::tr_key("font_saved"), ui::UI_ICON_SUCCESS, 1500);
-                    // Rebuild the menu so the font row shows the new label.
-                    ui::pop();
+                    // The context menu closed itself; reopen it with the new label.
+                    open_settings();
+                }
+                SET_RLE => {
+                    let next = if rle_enabled() { 0 } else { 1 };
+                    let _ = nvs::set_u32(NVS_RLE, next);
                     open_settings();
                 }
                 SET_FORGET => {
@@ -1328,31 +1486,28 @@ mod plugin {
                 }
                 _ => {}
             },
-            ACT_PORT_INPUT => {
-                if user_data == 1 {
-                    if let Some(text) = ui::consume_input_text(8) {
-                        match text.trim().parse::<u32>() {
-                            Ok(p) if (1024..=65535).contains(&p) => {
-                                let _ = nvs::set_u32(NVS_PORT, p);
-                                apply_port(p as u16);
-                            }
-                            _ => {
-                                ui::push_message(i18n::tr_key("bad_port"), ui::UI_ICON_ERROR, 2500)
-                            }
+            ACT_PORT_INPUT if user_data == 1 => {
+                if let Some(text) = ui::consume_input_text(8) {
+                    match text.trim().parse::<u32>() {
+                        Ok(p) if (1024..=65535).contains(&p) => {
+                            let _ = nvs::set_u32(NVS_PORT, p);
+                            apply_port(p as u16);
                         }
+                        _ => ui::push_message(i18n::tr_key("bad_port"), ui::UI_ICON_ERROR, 2500),
                     }
                 }
             }
-            ACT_SLIDER_ENERGY | ACT_SLIDER_CHUNK | ACT_SLIDER_FEED => {
-                if user_data == 1 {
-                    if let Some(v) = ui::consume_input_int() {
-                        let key = match action_id {
-                            ACT_SLIDER_ENERGY => NVS_ENERGY,
-                            ACT_SLIDER_CHUNK => NVS_CHUNK,
-                            _ => NVS_FEED,
-                        };
-                        let _ = nvs::set_u32(key, v as u32);
-                    }
+            ACT_SLIDER_ENERGY | ACT_SLIDER_SPEED | ACT_SLIDER_CHUNK | ACT_SLIDER_FEED
+                if user_data == 1 =>
+            {
+                if let Some(v) = ui::consume_input_int() {
+                    let key = match action_id {
+                        ACT_SLIDER_ENERGY => NVS_ENERGY,
+                        ACT_SLIDER_SPEED => NVS_SPEED,
+                        ACT_SLIDER_CHUNK => NVS_CHUNK,
+                        _ => NVS_FEED,
+                    };
+                    let _ = nvs::set_u32(key, v as u32);
                 }
             }
             ACT_OUTPUT_MENU => {
@@ -1398,42 +1553,65 @@ mod plugin {
                         let _ = feature::report_result(feature::STATUS_ERROR);
                         return 0;
                     }
-                    match raster::parse(&job.data) {
-                        Some(j) => {
-                            s().job_active = true;
-                            let ras = Ras {
+                    s().job_active = true;
+                    let started = match raster::parse(&job.data) {
+                        Some(j) => start_print(
+                            Ras {
                                 bits: j.rows.to_vec(),
                                 stride: j.stride_bytes as usize,
                                 height: j.height_px as usize,
-                            };
-                            start_print(ras, AfterPrint::ReportJob);
-                        }
-                        None => {
-                            log::warn(TAG, "malformed thermo_print job");
-                            let _ = feature::report_result(feature::STATUS_ERROR);
-                        }
+                            },
+                            AfterPrint::Nothing,
+                        ),
+                        None => match raster::parse_text(&job.data) {
+                            Some(t) => print_text(t),
+                            None => {
+                                log::warn(TAG, "malformed thermo_print job");
+                                false
+                            }
+                        },
+                    };
+                    if !started {
+                        finish_job(feature::STATUS_ERROR);
                     }
                 }
             }
             ACT_DISCOVERED => on_discovered(),
             ACT_NOTIFY => {
-                // Printer status notifications: drain the queue, log each frame.
+                // Printer status notifications drive flow control; anything
+                // else is logged.
                 let mut buf = [0u8; 64];
+                let now = s().now_ms;
                 while let Ok(Some((_, n))) = ble::consume_notification(&mut buf) {
                     if n == 0 {
                         break;
                     }
-                    log::hex(TAG, "printer status", &buf[..n]);
+                    match proto::parse_status(&buf[..n]) {
+                        Some(status) => {
+                            if let Drive::Sending { paused_since, .. } = &mut s().drive {
+                                *paused_since = match status {
+                                    proto::Status::BufferFull => Some(now),
+                                    proto::Status::Ready => None,
+                                };
+                            }
+                        }
+                        None => log::hex(TAG, "printer status", &buf[..n]),
+                    }
                 }
             }
             ACT_WRITE_DONE => {
-                // user_data carries the NimBLE status (0 = success).
-                if let Drive::Sending { gated, .. } = &mut s().drive {
-                    if user_data != 0 {
-                        fail_print("write status");
-                    } else {
-                        *gated = false;
-                    }
+                // idx = attribute handle, user_data = NimBLE status (0 = ok).
+                // The CCCD write of the RX subscription completes here too.
+                if idx as u16 != s().tx_handle {
+                    return 0;
+                }
+                if !matches!(s().drive, Drive::Sending { .. }) {
+                    return 0;
+                }
+                if user_data != 0 {
+                    fail_print("write status");
+                } else if let Drive::Sending { gated, .. } = &mut s().drive {
+                    *gated = false;
                 }
             }
             _ => {}

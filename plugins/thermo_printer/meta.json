@@ -1,6 +1,6 @@
 {
   "id": "thermo_printer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "krim",
   "icon": "info",
   "host_api_level_min": "0.8",
@@ -66,6 +66,9 @@
       "forgot_printer": { "en": "Printer forgotten",    "de": "Drucker vergessen" },
       "ble_off":        { "en": "BLE is disabled",      "de": "BLE ist deaktiviert" },
       "s_energy":       { "en": "Energy",               "de": "Energie" },
+      "s_speed":        { "en": "Feed speed (lower = darker)", "de": "Vorschub (kleiner = dunkler)" },
+      "rle_on":         { "en": "Row compression: on",  "de": "Zeilenkompression: an" },
+      "rle_off":        { "en": "Row compression: off", "de": "Zeilenkompression: aus" },
       "s_chunk":        { "en": "Chunk size",           "de": "Paketgroesse" },
       "s_feed":         { "en": "Paper feed",           "de": "Papiervorschub" },
       "s_forget":       { "en": "Forget printer",       "de": "Drucker vergessen" }

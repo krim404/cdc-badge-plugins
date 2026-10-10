@@ -10,6 +10,7 @@ members = [
     "examples/sci_calc",
     "examples/canvas_demo",
     "examples/mini_messenger",
+    "examples/print_counter",
     "plugins/home_assistant",
     "plugins/matrix",
     "plugins/grove_led",

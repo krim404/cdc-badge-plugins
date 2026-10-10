@@ -3,9 +3,17 @@
 //!
 //! ```text
 //! offset 0: u16 LE magic 0x5450 ("TP")   2: u8 version = 1   3: u8 flags = 0
-//!        4: u16 LE width_px (<= 384)     6: u16 LE height_px
+//!        4: u16 LE width_px (<= 384)     6: u16 LE height_px (<= 2048)
 //!        8: u16 LE stride_bytes         10: u16 LE reserved = 0
 //!       12: rows[height][stride], MSB-first, set bit = black
+//! ```
+//!
+//! A job may instead carry plain text, which this plugin word-wraps and
+//! paginates itself:
+//!
+//! ```text
+//! offset 0: u16 LE magic 0x5854 ("TX")   2: u8 version = 1   3: u8 reserved = 0
+//!        4: UTF-8 text
 //! ```
 
 #![allow(dead_code)]
@@ -20,6 +28,12 @@ pub const VERSION: u8 = 1;
 pub const HEADER_LEN: usize = 12;
 /// Maximum printable width.
 pub const MAX_WIDTH_PX: u16 = 384;
+/// Maximum job height in pixels (about a quarter metre of paper).
+pub const MAX_HEIGHT_PX: u16 = 2048;
+/// Text-job magic ("TX" as little-endian u16).
+pub const TEXT_MAGIC: u16 = 0x5854;
+/// Text-job header size in bytes.
+pub const TEXT_HEADER_LEN: usize = 4;
 
 /// A parsed thermo_print job referencing the payload's row data.
 pub struct Job<'a> {
@@ -55,7 +69,7 @@ pub fn parse(payload: &[u8]) -> Option<Job<'_>> {
     let width_px = u16::from_le_bytes([payload[4], payload[5]]);
     let height_px = u16::from_le_bytes([payload[6], payload[7]]);
     let stride_bytes = u16::from_le_bytes([payload[8], payload[9]]);
-    if width_px == 0 || width_px > MAX_WIDTH_PX || height_px == 0 {
+    if width_px == 0 || width_px > MAX_WIDTH_PX || height_px == 0 || height_px > MAX_HEIGHT_PX {
         return None;
     }
     if (stride_bytes as usize) < (width_px as usize).div_ceil(8) {
@@ -69,6 +83,28 @@ pub fn parse(payload: &[u8]) -> Option<Job<'_>> {
         stride_bytes,
         rows,
     })
+}
+
+/// Build a text-job payload.
+pub fn build_text(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(TEXT_HEADER_LEN + text.len());
+    out.extend_from_slice(&TEXT_MAGIC.to_le_bytes());
+    out.push(VERSION);
+    out.push(0);
+    out.extend_from_slice(text.as_bytes());
+    out
+}
+
+/// Parse a text-job payload. Returns `None` on any malformation.
+pub fn parse_text(payload: &[u8]) -> Option<&str> {
+    if payload.len() < TEXT_HEADER_LEN {
+        return None;
+    }
+    let magic = u16::from_le_bytes([payload[0], payload[1]]);
+    if magic != TEXT_MAGIC || payload[2] != VERSION {
+        return None;
+    }
+    core::str::from_utf8(&payload[TEXT_HEADER_LEN..]).ok()
 }
 
 #[cfg(test)]
@@ -101,6 +137,7 @@ mod tests {
         assert!(parse(&build(0, 1, 48, &[0u8; 48])).is_none());
         assert!(parse(&build(400, 1, 50, &[0u8; 50])).is_none());
         assert!(parse(&build(384, 0, 48, &[])).is_none());
+        assert!(parse(&build(1, MAX_HEIGHT_PX + 1, 1, &[0u8; 2049])).is_none());
         // stride smaller than the packed width
         assert!(parse(&build(384, 1, 40, &[0u8; 40])).is_none());
     }
@@ -118,5 +155,32 @@ mod tests {
         let job = parse(&p).expect("narrow raster valid");
         assert_eq!(job.width_px, 100);
         assert_eq!(job.stride_bytes, 13);
+    }
+
+    #[test]
+    fn text_round_trip() {
+        let p = build_text("Ticket 42\nline two");
+        assert_eq!(parse_text(&p), Some("Ticket 42\nline two"));
+        assert_eq!(parse_text(&build_text("")), Some(""));
+    }
+
+    #[test]
+    fn text_rejects_bad_header_and_utf8() {
+        let mut p = build_text("hi");
+        p[0] = 0x00;
+        assert!(parse_text(&p).is_none());
+        let mut p = build_text("hi");
+        p[2] = 9;
+        assert!(parse_text(&p).is_none());
+        assert!(parse_text(&[0x54, 0x58, 1]).is_none());
+        let mut p = build_text("hi");
+        p.push(0xFF);
+        assert!(parse_text(&p).is_none());
+    }
+
+    #[test]
+    fn job_kinds_do_not_cross_parse() {
+        assert!(parse_text(&build(384, 1, 48, &[0u8; 48])).is_none());
+        assert!(parse(&build_text("hello")).is_none());
     }
 }

@@ -1,0 +1,50 @@
+{
+  "id": "print_counter",
+  "version": "0.1.0",
+  "author": "krim",
+  "icon": "paragraph",
+  "host_api_level_min": "0.8",
+  "linear_memory_kb": 128,
+  "i18n": {
+    "default_language": "en",
+    "meta": {
+      "name": {
+        "en": "Print Counter"
+      },
+      "description": {
+        "en": "Fetches a configurable URL and prints the response; the counter in the URL advances after every print."
+      }
+    },
+    "strings": {
+      "print_label": {
+        "en": "Print #"
+      },
+      "menu_url": {
+        "en": "Print URL"
+      },
+      "url_title": {
+        "en": "URL (;N = number)"
+      },
+      "need_url": {
+        "en": "Set the print URL first"
+      },
+      "no_wifi": {
+        "en": "No WiFi"
+      },
+      "http_failed": {
+        "en": "Request failed"
+      },
+      "print_failed": {
+        "en": "Print failed"
+      }
+    }
+  },
+  "capabilities": {
+    "wifi": true,
+    "http": true,
+    "background": true,
+    "ui_exclusive": false,
+    "nvs_namespace": "plg_printcnt"
+  },
+  "prerequisites": {}
+}

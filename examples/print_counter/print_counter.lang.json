@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "translations": {
+    "de": {
+      "meta.name": "Druckzähler",
+      "meta.description": "Ruft eine einstellbare URL auf und druckt die Antwort; der Zähler in der URL läuft nach jedem Druck weiter.",
+      "print_label": "Drucken #",
+      "menu_url": "Druck-URL",
+      "url_title": "URL (;N = Nummer)",
+      "need_url": "Erst die Druck-URL setzen",
+      "no_wifi": "Kein WLAN",
+      "http_failed": "Abruf fehlgeschlagen",
+      "print_failed": "Druck fehlgeschlagen"
+    }
+  }
+}

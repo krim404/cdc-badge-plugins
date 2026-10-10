@@ -1,8 +1,9 @@
-//! Cat-printer BLE protocol: frame format, CRC8, row encoding and the
-//! command sequence for one print job.
+//! Cat-printer BLE protocol: frame format, CRC8, row encoding, status
+//! notifications and the command sequence for one print job.
 //!
-//! Clean-room implementation; https://github.com/NaitLee/Cat-Printer served
-//! as the behaviour and UUID reference only. Frame format:
+//! Clean-room implementation. The validated command subset follows
+//! `printable` (cicloid/printable, docs/PROTOCOL.md "X6" section) and
+//! NaitLee/Cat-Printer served as the UUID reference. Frame format:
 //! `51 78 <cmd> 00 <len_lo> <len_hi> <payload> <crc8(payload)> ff`.
 //! Printer rows are LSB-first within each byte (bit 0 = leftmost pixel), the
 //! opposite of the badge raster layout, so row encoding reverses each byte.
@@ -11,16 +12,16 @@
 
 use alloc::vec::Vec;
 
-/// GATT service UUID of the known cat printer models.
-pub const SERVICE_UUID: &str = "0000ae00-0000-1000-8000-00805f9b34fb";
-/// TX characteristic (badge -> printer, write).
+/// GATT service UUID of the cat printer family (16-bit 0xAE30).
+pub const SERVICE_UUID: &str = "0000ae30-0000-1000-8000-00805f9b34fb";
+/// TX characteristic (badge -> printer, write without response).
 pub const TX_UUID: &str = "0000ae01-0000-1000-8000-00805f9b34fb";
 /// RX characteristic (printer -> badge, notify).
 pub const RX_UUID: &str = "0000ae02-0000-1000-8000-00805f9b34fb";
 
 /// Service UUID in the 16-byte little-endian layout the BLE host API uses.
 pub const SERVICE_UUID_LE: [u8; 16] = [
-    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0x00, 0xae, 0x00, 0x00,
+    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0x30, 0xae, 0x00, 0x00,
 ];
 /// TX characteristic UUID (little-endian).
 pub const TX_UUID_LE: [u8; 16] = [
@@ -31,9 +32,11 @@ pub const RX_UUID_LE: [u8; 16] = [
     0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0x02, 0xae, 0x00, 0x00,
 ];
 
-/// Scan-name prefixes of the supported printer models.
-pub const MODELS: [&str; 10] = [
-    "GB01", "GB02", "GB03", "GT01", "YT01", "MX05", "MX06", "MX08", "MX10", "MXTP",
+/// Scan-name prefixes of the supported printer models (cat family). The
+/// `LX` family speaks a different protocol and is deliberately absent.
+pub const MODELS: [&str; 13] = [
+    "GB01", "GB02", "GB03", "GT01", "YT01", "MX05", "MX06", "MX08", "MX10", "MXTP", "X6", "x6",
+    "SC05",
 ];
 
 /// Print width of every supported model in pixels.
@@ -47,32 +50,35 @@ pub fn qr_scale(modules: u16) -> u8 {
     ((WIDTH_PX as u32) / (modules as u32 + 4)).clamp(1, 12) as u8
 }
 
-pub const CMD_RETRACT_PAPER: u8 = 0xA0;
 pub const CMD_FEED_PAPER: u8 = 0xA1;
 pub const CMD_DRAW_BITMAP: u8 = 0xA2;
-pub const CMD_GET_DEV_STATE: u8 = 0xA3;
-pub const CMD_SET_QUALITY: u8 = 0xA4;
-pub const CMD_CONTROL_LATTICE: u8 = 0xA6;
+pub const CMD_DEVICE_STATUS: u8 = 0xAE;
 pub const CMD_SET_ENERGY: u8 = 0xAF;
 pub const CMD_SET_SPEED: u8 = 0xBD;
-pub const CMD_DRAWING_MODE: u8 = 0xBE;
+pub const CMD_APPLY_ENERGY: u8 = 0xBE;
 pub const CMD_DRAW_BITMAP_RLE: u8 = 0xBF;
 
-/// Lattice magic that opens a print (from the protocol behaviour reference).
-pub const LATTICE_START: [u8; 11] = [
-    0xAA, 0x55, 0x17, 0x38, 0x44, 0x5F, 0x5F, 0x5F, 0x44, 0x38, 0x2C,
-];
-/// Lattice magic that closes a print.
-pub const LATTICE_END: [u8; 11] = [
-    0xAA, 0x55, 0x17, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x17,
-];
-
-/// Default thermal energy (model-dependent; tunable in Settings).
-pub const DEFAULT_ENERGY: u16 = 0x2EE0;
-/// Default quality byte.
-pub const DEFAULT_QUALITY: u8 = 0x33;
+/// Default thermal energy (kitty-printer "medium" preset; tunable in Settings).
+pub const DEFAULT_ENERGY: u16 = 24000;
+/// Lowest / highest energy validated by the reference implementation.
+pub const MIN_ENERGY: u16 = 12000;
+pub const MAX_ENERGY: u16 = 48000;
+/// Default feed-speed divisor (smaller is faster and lighter).
+pub const DEFAULT_SPEED: u8 = 16;
+/// Fastest / slowest speed divisor validated by the reference implementation.
+pub const MIN_SPEED: u8 = 8;
+pub const MAX_SPEED: u8 = 32;
 /// Default feed after the image, in printer steps.
 pub const DEFAULT_FEED_STEPS: u16 = 0x0070;
+
+/// Printer flow-control status carried by a 0xAE notification.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Status {
+    /// Receive buffer full: stop sending rows until `Ready`.
+    BufferFull,
+    /// Sending may resume.
+    Ready,
+}
 
 /// CRC8, polynomial 0x07, init 0x00 (the frame checksum over the payload).
 pub fn crc8(data: &[u8]) -> u8 {
@@ -105,6 +111,30 @@ pub fn frame(cmd: u8, payload: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Decode a printer status notification (`51 78 AE 01 01 00 <st> <crc> FF`).
+/// Anything else (battery, device info, prefixed variants) yields `None`.
+pub fn parse_status(data: &[u8]) -> Option<Status> {
+    if data.len() != 9
+        || data[0] != 0x51
+        || data[1] != 0x78
+        || data[2] != CMD_DEVICE_STATUS
+        || data[3] != 0x01
+        || data[4] != 0x01
+        || data[5] != 0x00
+        || data[8] != 0xFF
+    {
+        return None;
+    }
+    if crc8(&data[6..7]) != data[7] {
+        return None;
+    }
+    match data[6] {
+        0x10 => Some(Status::BufferFull),
+        0x00 => Some(Status::Ready),
+        _ => None,
+    }
+}
+
 /// Reverse the bit order of one byte (badge MSB-first -> printer LSB-first).
 pub fn reverse_bits(mut b: u8) -> u8 {
     b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
@@ -114,11 +144,13 @@ pub fn reverse_bits(mut b: u8) -> u8 {
 }
 
 /// Encode a badge raster row (MSB-first) as an uncompressed 0xA2 frame.
+/// Rows narrower than [`ROW_BYTES`] are padded with white on the right.
 pub fn frame_row_plain(row: &[u8]) -> Vec<u8> {
-    let mut printer_row = Vec::with_capacity(row.len());
-    for &b in row {
+    let mut printer_row = Vec::with_capacity(ROW_BYTES);
+    for &b in row.iter().take(ROW_BYTES) {
         printer_row.push(reverse_bits(b));
     }
+    printer_row.resize(ROW_BYTES, 0);
     frame(CMD_DRAW_BITMAP, &printer_row)
 }
 
@@ -156,38 +188,62 @@ fn push_run(out: &mut Vec<u8>, val: bool, mut len: u32) {
     }
 }
 
-/// Encode a raster row as the smaller of RLE (0xBF) and plain (0xA2).
-pub fn frame_row(row: &[u8]) -> Vec<u8> {
-    match rle_encode_row(row) {
-        Some(rle) => frame(CMD_DRAW_BITMAP_RLE, &rle),
-        None => frame_row_plain(row),
+/// Encode a raster row: plain 0xA2, or the smaller of RLE (0xBF) and plain
+/// when `rle` is enabled. RLE rows are only emitted for full-width rows.
+pub fn frame_row(row: &[u8], rle: bool) -> Vec<u8> {
+    if rle && row.len() == ROW_BYTES {
+        if let Some(runs) = rle_encode_row(row) {
+            return frame(CMD_DRAW_BITMAP_RLE, &runs);
+        }
+    }
+    frame_row_plain(row)
+}
+
+/// Frames that open a job: speed, energy, apply, one blank lead row.
+pub fn job_setup(energy: u16, speed: u8) -> Vec<u8> {
+    let mut out = Vec::with_capacity(ROW_BYTES + 48);
+    out.extend_from_slice(&frame(CMD_SET_SPEED, &[speed]));
+    out.extend_from_slice(&frame(CMD_SET_ENERGY, &energy.to_le_bytes()));
+    out.extend_from_slice(&frame(CMD_APPLY_ENERGY, &[0x01]));
+    out.extend_from_slice(&frame_row_plain(&[0u8; ROW_BYTES]));
+    out
+}
+
+/// Frames for rows `from..to` of a packed raster (`stride` bytes per row,
+/// MSB-first, set bit = black); only the first ROW_BYTES of a row are printed.
+pub fn job_rows(bits: &[u8], stride: usize, from: usize, to: usize, rle: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(to.saturating_sub(from) * (ROW_BYTES + 8));
+    for y in from..to {
+        let row = &bits[y * stride..y * stride + ROW_BYTES.min(stride)];
+        out.extend_from_slice(&frame_row(row, rle));
+    }
+    out
+}
+
+/// Frames that close a job: the paper feed (nothing when `feed_steps` is 0).
+pub fn job_finish(feed_steps: u16) -> Vec<u8> {
+    if feed_steps > 0 {
+        frame(CMD_FEED_PAPER, &feed_steps.to_le_bytes())
+    } else {
+        Vec::new()
     }
 }
 
-/// Build the full byte stream for one print job from a packed raster.
-///
-/// `bits` holds `height` rows of `stride` bytes (MSB-first, set bit = black);
-/// only the first ROW_BYTES of each row are printed (raster must be 384 px).
+/// Build the full byte stream for one print job from a packed raster. The
+/// sequence mirrors the reference implementation: speed, energy, apply, one
+/// blank lead row, the rows, then the paper feed.
 pub fn build_job(
     bits: &[u8],
     stride: usize,
     height: usize,
     energy: u16,
-    quality: u8,
+    speed: u8,
     feed_steps: u16,
+    rle: bool,
 ) -> Vec<u8> {
-    let mut out = Vec::with_capacity(height * (ROW_BYTES + 8) + 64);
-    out.extend_from_slice(&frame(CMD_SET_QUALITY, &[quality]));
-    out.extend_from_slice(&frame(CMD_CONTROL_LATTICE, &LATTICE_START));
-    out.extend_from_slice(&frame(CMD_SET_ENERGY, &energy.to_le_bytes()));
-    out.extend_from_slice(&frame(CMD_DRAWING_MODE, &[0]));
-    for y in 0..height {
-        let row = &bits[y * stride..y * stride + ROW_BYTES.min(stride)];
-        out.extend_from_slice(&frame_row(row));
-    }
-    out.extend_from_slice(&frame(CMD_FEED_PAPER, &feed_steps.to_le_bytes()));
-    out.extend_from_slice(&frame(CMD_CONTROL_LATTICE, &LATTICE_END));
-    out.extend_from_slice(&frame(CMD_GET_DEV_STATE, &[0]));
+    let mut out = job_setup(energy, speed);
+    out.extend_from_slice(&job_rows(bits, stride, 0, height, rle));
+    out.extend_from_slice(&job_finish(feed_steps));
     out
 }
 
@@ -220,6 +276,49 @@ mod tests {
     }
 
     #[test]
+    fn setup_frames_match_reference_vectors() {
+        // Vectors from printable's packets.rs tests.
+        assert_eq!(
+            frame(CMD_SET_SPEED, &[16]),
+            [0x51, 0x78, 0xBD, 0x00, 0x01, 0x00, 0x10, 0x70, 0xFF]
+        );
+        assert_eq!(
+            frame(CMD_SET_ENERGY, &12000u16.to_le_bytes()),
+            [0x51, 0x78, 0xAF, 0x00, 0x02, 0x00, 0xE0, 0x2E, 0x89, 0xFF]
+        );
+        assert_eq!(
+            frame(CMD_APPLY_ENERGY, &[0x01]),
+            [0x51, 0x78, 0xBE, 0x00, 0x01, 0x00, 0x01, 0x07, 0xFF]
+        );
+    }
+
+    #[test]
+    fn status_notifications() {
+        assert_eq!(
+            parse_status(&[0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x10, 0x70, 0xFF]),
+            Some(Status::BufferFull)
+        );
+        assert_eq!(
+            parse_status(&[0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x00, 0x00, 0xFF]),
+            Some(Status::Ready)
+        );
+        // Wrong direction byte, bad CRC, unknown payload, wrong length.
+        assert_eq!(
+            parse_status(&[0x51, 0x78, 0xAE, 0x00, 0x01, 0x00, 0x10, 0x70, 0xFF]),
+            None
+        );
+        assert_eq!(
+            parse_status(&[0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x10, 0x00, 0xFF]),
+            None
+        );
+        assert_eq!(
+            parse_status(&[0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x20, 0xE0, 0xFF]),
+            None
+        );
+        assert_eq!(parse_status(&[0x51, 0x78, 0xAE, 0x01]), None);
+    }
+
+    #[test]
     fn bit_reversal() {
         assert_eq!(reverse_bits(0x80), 0x01);
         assert_eq!(reverse_bits(0x01), 0x80);
@@ -230,11 +329,25 @@ mod tests {
     }
 
     #[test]
+    fn narrow_rows_are_padded_to_full_width() {
+        let f = frame_row_plain(&[0xFF; 13]);
+        let len = f[4] as usize | ((f[5] as usize) << 8);
+        assert_eq!(len, ROW_BYTES);
+        assert_eq!(f.len(), 8 + ROW_BYTES);
+        assert_eq!(&f[6..19], &[0xFF; 13]);
+        assert_eq!(&f[19..6 + ROW_BYTES], &[0u8; ROW_BYTES - 13]);
+        // Narrow rows never go out as RLE even when enabled.
+        assert_eq!(frame_row(&[0u8; 13], true)[2], CMD_DRAW_BITMAP);
+    }
+
+    #[test]
     fn rle_all_white_row() {
         let row = [0u8; ROW_BYTES];
         let rle = rle_encode_row(&row).expect("all-white must compress");
         // 384 white pixels = 127 + 127 + 127 + 3.
         assert_eq!(rle, alloc::vec![127, 127, 127, 3]);
+        assert_eq!(frame_row(&row, true)[2], CMD_DRAW_BITMAP_RLE);
+        assert_eq!(frame_row(&row, false)[2], CMD_DRAW_BITMAP);
     }
 
     #[test]
@@ -244,7 +357,7 @@ mod tests {
             rle_encode_row(&row).is_none(),
             "1-px runs must not compress"
         );
-        let f = frame_row(&row);
+        let f = frame_row(&row, true);
         assert_eq!(f[2], CMD_DRAW_BITMAP);
     }
 
@@ -257,14 +370,9 @@ mod tests {
         assert_eq!(&rle[1..], &[127, 127, 122][..]); // 376 white
     }
 
-    #[test]
-    fn job_stream_shape() {
-        let bits = [0u8; ROW_BYTES * 2];
-        let job = build_job(&bits, ROW_BYTES, 2, DEFAULT_ENERGY, DEFAULT_QUALITY, 0x0070);
-        assert_eq!(job[0], 0x51);
-        assert_eq!(job[2], CMD_SET_QUALITY);
-        // Every frame starts 0x51 0x78 and ends 0xFF; count command bytes.
-        let mut cmds = alloc::vec::Vec::new();
+    /// Split a job stream into its command bytes, checking the framing.
+    fn commands(job: &[u8]) -> Vec<u8> {
+        let mut cmds = Vec::new();
         let mut i = 0;
         while i + 8 <= job.len() {
             assert_eq!(job[i], 0x51);
@@ -275,13 +383,51 @@ mod tests {
             i += 6 + len + 2;
         }
         assert_eq!(i, job.len());
-        assert_eq!(cmds.first(), Some(&CMD_SET_QUALITY));
-        assert_eq!(cmds.last(), Some(&CMD_GET_DEV_STATE));
+        cmds
+    }
+
+    #[test]
+    fn job_stream_sequence() {
+        let bits = [0u8; ROW_BYTES * 2];
+        let job = build_job(
+            &bits,
+            ROW_BYTES,
+            2,
+            DEFAULT_ENERGY,
+            DEFAULT_SPEED,
+            0x0070,
+            false,
+        );
         assert_eq!(
-            cmds.iter()
-                .filter(|&&c| c == CMD_DRAW_BITMAP_RLE || c == CMD_DRAW_BITMAP)
-                .count(),
-            2
+            commands(&job),
+            [
+                CMD_SET_SPEED,
+                CMD_SET_ENERGY,
+                CMD_APPLY_ENERGY,
+                CMD_DRAW_BITMAP, // blank lead row
+                CMD_DRAW_BITMAP,
+                CMD_DRAW_BITMAP,
+                CMD_FEED_PAPER,
+            ]
+        );
+        // Speed and energy payloads land where the printer expects them.
+        assert_eq!(job[6], DEFAULT_SPEED);
+        assert_eq!(&job[9 + 6..9 + 8], &DEFAULT_ENERGY.to_le_bytes());
+    }
+
+    #[test]
+    fn job_stream_rle_and_zero_feed() {
+        let bits = [0u8; ROW_BYTES];
+        let job = build_job(&bits, ROW_BYTES, 1, DEFAULT_ENERGY, DEFAULT_SPEED, 0, true);
+        assert_eq!(
+            commands(&job),
+            [
+                CMD_SET_SPEED,
+                CMD_SET_ENERGY,
+                CMD_APPLY_ENERGY,
+                CMD_DRAW_BITMAP,
+                CMD_DRAW_BITMAP_RLE,
+            ]
         );
     }
 
@@ -289,6 +435,10 @@ mod tests {
     fn model_matching() {
         assert!(is_known_model("GB01_1234"));
         assert!(is_known_model("MXTP"));
+        assert!(is_known_model("X6h-A1B2"));
+        assert!(is_known_model("x6h-A1B2"));
+        assert!(is_known_model("SC05-77"));
+        assert!(!is_known_model("LX-D02"));
         assert!(!is_known_model("Fridge"));
         assert!(!is_known_model(""));
     }
