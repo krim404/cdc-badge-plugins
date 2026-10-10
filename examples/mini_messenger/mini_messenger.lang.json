@@ -1,7 +1,12 @@
 {
-  "menu_send": "Senden",
-  "menu_inbox": "Posteingang",
-  "compose": "Nachricht",
-  "received": "Neue Nachricht",
-  "empty_inbox": "Noch keine Nachrichten"
+  "version": 1,
+  "translations": {
+    "de": {
+      "menu_send": "Senden",
+      "menu_inbox": "Posteingang",
+      "compose": "Nachricht",
+      "received": "Neue Nachricht",
+      "empty_inbox": "Noch keine Nachrichten"
+    }
+  }
 }

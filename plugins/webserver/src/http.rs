@@ -52,8 +52,9 @@ pub fn parse_request(request: &str) -> Request {
 }
 
 /// Map the local file path ("/" → index) to a served file name relative to the
-/// plugin's vFAT folder. Rejects path traversal (`..`). Returns `None` when the
-/// path is unsafe.
+/// plugin's vFAT folder. The folder is flat and the host accepts only
+/// `[A-Za-z0-9._-]` names, so the same allow-list applies here. Returns `None`
+/// when the path is unsafe.
 pub fn resolve_file(path: &str) -> Option<String> {
     let trimmed = path.trim_start_matches('/');
     let name = if trimmed.is_empty() {
@@ -61,7 +62,8 @@ pub fn resolve_file(path: &str) -> Option<String> {
     } else {
         trimmed
     };
-    if name.split('/').any(|seg| seg == ".." || seg == ".") {
+    let allowed = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-');
+    if name == "." || name == ".." || !name.bytes().all(allowed) {
         return None;
     }
     Some(String::from(name))
@@ -177,6 +179,10 @@ mod tests {
         assert_eq!(resolve_file("/foo.html"), Some("foo.html".to_string()));
         assert_eq!(resolve_file("/../secret"), None);
         assert_eq!(resolve_file("/a/../b"), None);
+        assert_eq!(resolve_file("/a/b.html"), None);
+        assert_eq!(resolve_file("/..\\x"), None);
+        assert_eq!(resolve_file("/sp ace"), None);
+        assert_eq!(resolve_file("/ok-1_2.txt"), Some("ok-1_2.txt".to_string()));
     }
 
     #[test]

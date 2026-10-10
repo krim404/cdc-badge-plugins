@@ -13,7 +13,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use cdc_badge_plugin::{canvas, gpio, i18n, log, nvs, plugin_main, socket, ui, wifi};
+use cdc_badge_plugin::{canvas, gpio, i18n, log, nvs, plugin_main, rmem, socket, time, ui, wifi};
 
 plugin_main!();
 
@@ -22,12 +22,19 @@ const TAG: &str = "gpio_mqtt";
 const DEFAULT_TOPIC: &str = "cdc-badge/gpio";
 const CLIENT_ID: &str = "cdc-badge-gpio";
 const KEEPALIVE_SECS: u16 = 60;
-const SOCKET_TIMEOUT_MS: u32 = 5_000;
+const SOCKET_TIMEOUT_MS: u32 = 2_000;
 const POLL_INTERVAL_MS: u64 = 100;
+/// Minimum spacing between broker connection attempts.
+const CONNECT_RETRY_MS: u64 = 5_000;
+/// Idle time after which a PINGREQ keeps the broker session alive (must stay
+/// below KEEPALIVE_SECS).
+const PING_INTERVAL_MS: u64 = 30_000;
+const MQTT_PINGREQ: [u8; 2] = [0xC0, 0x00];
 
 const NVS_URL: &str = "mqtt_url";
 const NVS_USER: &str = "username";
 const NVS_PASS: &str = "password";
+const RMEM_PASS: &str = "mqtt_pass";
 const NVS_TOPIC: &str = "topic";
 
 const ACT_CANVAS_KEY: u32 = 1;
@@ -100,6 +107,9 @@ static LAST_LEVELS: PluginCell<[bool; PIN_COUNT]> = PluginCell::new([false; PIN_
 static HAVE_LEVELS: PluginCell<bool> = PluginCell::new(false);
 static LAST_POLL_MS: PluginCell<u64> = PluginCell::new(0);
 static LAST_PUBLISH: PluginCell<PublishState> = PluginCell::new(PublishState::Never);
+static CONN: PluginCell<Option<socket::TcpStream>> = PluginCell::new(None);
+static LAST_CONNECT_MS: PluginCell<u64> = PluginCell::new(0);
+static LAST_TX_MS: PluginCell<u64> = PluginCell::new(0);
 
 struct MqttTarget {
     host: String,
@@ -202,8 +212,27 @@ fn config_user() -> String {
     nvs::get_str(NVS_USER, USER_MAX_LEN as usize).unwrap_or_default()
 }
 
+/// Password from retained memory; a value left in NVS by an earlier version
+/// is moved over once and erased there.
 fn config_pass() -> String {
-    nvs::get_str(NVS_PASS, PASS_MAX_LEN as usize).unwrap_or_default()
+    if let Ok(bytes) = rmem::read(RMEM_PASS, PASS_MAX_LEN as usize) {
+        if let Ok(s) = String::from_utf8(bytes) {
+            return s;
+        }
+    }
+    let legacy = nvs::get_str(NVS_PASS, PASS_MAX_LEN as usize).unwrap_or_default();
+    if !legacy.is_empty() && rmem::write(RMEM_PASS, legacy.as_bytes()).is_ok() {
+        let _ = nvs::erase(NVS_PASS);
+    }
+    legacy
+}
+
+fn store_pass(value: &str) {
+    let _ = if value.is_empty() {
+        rmem::erase(RMEM_PASS)
+    } else {
+        rmem::write(RMEM_PASS, value.as_bytes())
+    };
 }
 
 fn config_topic() -> String {
@@ -227,7 +256,11 @@ fn read_levels() -> [bool; PIN_COUNT] {
 }
 
 fn level_u8(v: bool) -> u8 {
-    if v { 1 } else { 0 }
+    if v {
+        1
+    } else {
+        0
+    }
 }
 
 fn snapshot_payload(levels: &[bool; PIN_COUNT]) -> String {
@@ -263,13 +296,22 @@ fn write_all(stream: &socket::TcpStream, mut data: &[u8]) -> Result<(), &'static
     Ok(())
 }
 
-fn mqtt_publish(payload: &str) -> Result<(), &'static str> {
+/// Open a broker session (CONNECT + CONNACK).
+fn mqtt_connect() -> Result<socket::TcpStream, &'static str> {
     let url = config_url();
     let target = parse_mqtt_url(&url).ok_or("invalid url: expected host or mqtt://host[:port]")?;
     let user = config_user();
     let pass = config_pass();
-    let user_opt = if user.is_empty() { None } else { Some(user.as_str()) };
-    let pass_opt = if pass.is_empty() { None } else { Some(pass.as_str()) };
+    let user_opt = if user.is_empty() {
+        None
+    } else {
+        Some(user.as_str())
+    };
+    let pass_opt = if pass.is_empty() {
+        None
+    } else {
+        Some(pass.as_str())
+    };
 
     let stream = socket::TcpStream::connect(&target.host, target.port, SOCKET_TIMEOUT_MS)
         .map_err(|_| "tcp connect failed")?;
@@ -293,10 +335,42 @@ fn mqtt_publish(payload: &str) -> Result<(), &'static str> {
         0x05 => return Err("broker: not authorized (set username/password)"),
         _ => return Err("broker rejected connect"),
     }
+    Ok(stream)
+}
 
+/// Send on the open broker session; reconnect at most every
+/// CONNECT_RETRY_MS so a flapping broker cannot stall the tick.
+fn mqtt_send(packet: &[u8]) -> Result<(), &'static str> {
+    let now = time::uptime_ms();
+    if CONN.borrow().is_none() {
+        let last = *LAST_CONNECT_MS.borrow();
+        if last != 0 && now.wrapping_sub(last) < CONNECT_RETRY_MS {
+            return Err("not connected");
+        }
+        *LAST_CONNECT_MS.borrow_mut() = now;
+        *CONN.borrow_mut() = Some(mqtt_connect()?);
+    }
+    let result = match CONN.borrow().as_ref() {
+        Some(stream) => write_all(stream, packet),
+        None => Err("not connected"),
+    };
+    if result.is_err() {
+        *CONN.borrow_mut() = None;
+    } else {
+        *LAST_TX_MS.borrow_mut() = now;
+    }
+    result
+}
+
+fn mqtt_publish(payload: &str) -> Result<(), &'static str> {
     let publish = encode_publish(&config_topic(), payload.as_bytes());
-    write_all(&stream, &publish)?;
-    Ok(())
+    mqtt_send(&publish)
+}
+
+fn mqtt_keepalive(now_ms: u64) {
+    if CONN.borrow().is_some() && now_ms.wrapping_sub(*LAST_TX_MS.borrow()) >= PING_INTERVAL_MS {
+        let _ = mqtt_send(&MQTT_PINGREQ);
+    }
 }
 
 fn remember_publish(result: Result<(), &'static str>) {
@@ -335,7 +409,7 @@ fn draw_canvas() {
     let not_configured;
     let target_label: &str = if target.is_empty() {
         not_configured = i18n::tr_key("not_configured");
-        &not_configured
+        not_configured
     } else {
         &target
     };
@@ -351,7 +425,11 @@ fn draw_canvas() {
     canvas::set_text_size(1);
     canvas::draw_text(0, 0, &format!("MQTT: {}", target_label));
     canvas::draw_text(0, 12, &format!("{}: {}", i18n::tr_key("wifi"), wifi_label));
-    canvas::draw_text(0, 24, &format!("{}: {}", i18n::tr_key("last_publish"), publish_label));
+    canvas::draw_text(
+        0,
+        24,
+        &format!("{}: {}", i18n::tr_key("last_publish"), publish_label),
+    );
     canvas::hline(0, 35, w as i16);
 
     // Pin grid: fill columns top-to-bottom, then wrap to the next column so all
@@ -374,7 +452,7 @@ fn draw_canvas() {
 }
 
 fn open_settings_menu() {
-    ui::ContextMenuBuilder::new(&i18n::tr_key("settings"))
+    ui::ContextMenuBuilder::new(i18n::tr_key("settings"))
         .on_select(ACT_CTX_PICK)
         .item(i18n::tr_key("mqtt_url"), CTX_URL, ui::UI_ICON_ANGLE)
         .item(i18n::tr_key("username"), CTX_USER, ui::UI_ICON_MALE)
@@ -388,6 +466,7 @@ fn poll_gpio(now_ms: u64) {
         return;
     }
     *LAST_POLL_MS.borrow_mut() = now_ms;
+    mqtt_keepalive(now_ms);
 
     let next = read_levels();
     if !*HAVE_LEVELS.borrow() {
@@ -438,8 +517,8 @@ pub extern "C" fn plugin_on_enter() -> i32 {
     *HAVE_LEVELS.borrow_mut() = true;
     *LAST_PUBLISH.borrow_mut() = PublishState::Never;
     log::info(TAG, &format!("enter: url='{}'", config_url()));
-    canvas::push(&i18n::tr_meta("name"), ACT_CANVAS_KEY, 0);
-    canvas::set_footer(&i18n::tr_key("hint_main"));
+    canvas::push(i18n::tr_meta("name"), ACT_CANVAS_KEY, 0);
+    canvas::set_footer(i18n::tr_key("hint_main"));
     draw_canvas();
     let levels = *LAST_LEVELS.borrow();
     publish_snapshot(&levels);
@@ -451,6 +530,7 @@ pub extern "C" fn plugin_on_enter() -> i32 {
 pub extern "C" fn plugin_on_exit() -> i32 {
     *HAVE_LEVELS.borrow_mut() = false;
     *LAST_POLL_MS.borrow_mut() = 0;
+    *CONN.borrow_mut() = None;
     0
 }
 
@@ -474,7 +554,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             CTX_URL => {
                 let initial = config_url();
                 ui::push_t9_input(
-                    &i18n::tr_key("mqtt_url"),
+                    i18n::tr_key("mqtt_url"),
                     Some(&initial),
                     URL_MAX_LEN,
                     ACT_URL_DONE,
@@ -483,7 +563,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             CTX_USER => {
                 let initial = config_user();
                 ui::push_t9_input(
-                    &i18n::tr_key("username"),
+                    i18n::tr_key("username"),
                     Some(&initial),
                     USER_MAX_LEN,
                     ACT_USER_DONE,
@@ -492,7 +572,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             CTX_PASS => {
                 let initial = config_pass();
                 ui::push_password(
-                    &i18n::tr_key("password"),
+                    i18n::tr_key("password"),
                     Some(&initial),
                     PASS_MAX_LEN,
                     ACT_PASS_DONE,
@@ -501,7 +581,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             CTX_TOPIC => {
                 let initial = config_topic();
                 ui::push_t9_input(
-                    &i18n::tr_key("topic"),
+                    i18n::tr_key("topic"),
                     Some(&initial),
                     TOPIC_MAX_LEN,
                     ACT_TOPIC_DONE,
@@ -513,6 +593,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             if user_data == 1 {
                 if let Some(value) = ui::consume_input_text(URL_MAX_LEN as usize) {
                     let _ = nvs::set_str(NVS_URL, value.trim());
+                    *CONN.borrow_mut() = None;
                 }
             }
             draw_canvas();
@@ -521,6 +602,7 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             if user_data == 1 {
                 if let Some(value) = ui::consume_input_text(USER_MAX_LEN as usize) {
                     let _ = nvs::set_str(NVS_USER, value.trim());
+                    *CONN.borrow_mut() = None;
                 }
             }
             draw_canvas();
@@ -528,7 +610,8 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
         ACT_PASS_DONE => {
             if user_data == 1 {
                 if let Some(value) = ui::consume_input_text(PASS_MAX_LEN as usize) {
-                    let _ = nvs::set_str(NVS_PASS, value.trim());
+                    store_pass(value.trim());
+                    *CONN.borrow_mut() = None;
                 }
             }
             draw_canvas();
@@ -600,11 +683,8 @@ mod tests {
         assert_eq!(
             pkt,
             alloc::vec![
-                0x10, 0x1a,
-                0x00, 0x04, b'M', b'Q', b'T', b'T',
-                0x04, 0x02,
-                0x00, 0x3c,
-                0x00, 0x0e, b'c', b'd', b'c', b'-', b'b', b'a', b'd', b'g', b'e', b'-', b'g', b'p', b'i', b'o',
+                0x10, 0x1a, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3c, 0x00, 0x0e,
+                b'c', b'd', b'c', b'-', b'b', b'a', b'd', b'g', b'e', b'-', b'g', b'p', b'i', b'o',
             ]
         );
     }
@@ -615,13 +695,9 @@ mod tests {
         assert_eq!(
             pkt,
             alloc::vec![
-                0x10, 0x1d,
-                0x00, 0x04, b'M', b'Q', b'T', b'T',
-                0x04, 0xc2,
-                0x00, 0x3c,
-                0x00, 0x03, b'c', b'i', b'd',
-                0x00, 0x04, b'u', b's', b'e', b'r',
-                0x00, 0x06, b's', b'e', b'c', b'r', b'e', b't',
+                0x10, 0x1d, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0xc2, 0x00, 0x3c, 0x00, 0x03,
+                b'c', b'i', b'd', 0x00, 0x04, b'u', b's', b'e', b'r', 0x00, 0x06, b's', b'e', b'c',
+                b'r', b'e', b't',
             ]
         );
     }
@@ -632,10 +708,10 @@ mod tests {
         assert_eq!(
             pkt,
             alloc::vec![
-                0x30, 0x2a,
-                0x00, 0x0e, b'c', b'd', b'c', b'-', b'b', b'a', b'd', b'g', b'e', b'/', b'g', b'p', b'i', b'o',
-                b'{', b'"', b'p', b'i', b'n', b'"', b':', b'"', b'g', b'r', b'o', b'v', b'e', b'0', b'"', b',',
-                b'"', b'v', b'a', b'l', b'u', b'e', b'"', b':', b'1', b'}',
+                0x30, 0x2a, 0x00, 0x0e, b'c', b'd', b'c', b'-', b'b', b'a', b'd', b'g', b'e', b'/',
+                b'g', b'p', b'i', b'o', b'{', b'"', b'p', b'i', b'n', b'"', b':', b'"', b'g', b'r',
+                b'o', b'v', b'e', b'0', b'"', b',', b'"', b'v', b'a', b'l', b'u', b'e', b'"', b':',
+                b'1', b'}',
             ]
         );
     }

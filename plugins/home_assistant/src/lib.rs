@@ -29,7 +29,10 @@ const NVS_HTTPS: &str = "https";
 const NVS_FAVS: &str = "favs";
 const TOKEN_NAME: &str = "ha_token";
 
-const MAX_FAVS: usize = 32;
+/// NVS strings hold at most 4000 bytes; keeps the favorites line list below that.
+const MAX_FAVS: usize = 24;
+const HTTP_GET_TIMEOUT_MS: u32 = 3000;
+const HTTP_BODY_MAX: usize = 64 * 1024;
 
 const ACT_HOME_SELECT: u32 = 10;
 const ACT_HOME_MENU: u32 = 11;
@@ -41,6 +44,7 @@ const ACT_BROWSE_FILTER_PICK: u32 = 22;
 const ACT_BROWSE_SEARCH_DONE: u32 = 23;
 
 const ACT_SETUP_HOST_DONE: u32 = 30;
+const ACT_SETUP_HTTP_CONFIRM: u32 = 31;
 const ACT_SETUP_TOKEN_DONE: u32 = 33;
 
 const ACT_LIGHT_BRIGHT_DONE: u32 = 40;
@@ -141,10 +145,7 @@ impl Domain {
     }
 
     fn is_toggleable(self) -> bool {
-        matches!(
-            self,
-            Domain::Light | Domain::Switch | Domain::InputBoolean
-        )
+        matches!(self, Domain::Light | Domain::Switch | Domain::InputBoolean)
     }
 
     fn is_readonly(self) -> bool {
@@ -308,6 +309,8 @@ static CLIMATE: PluginCell<Option<ClimateState>> = PluginCell::new(None);
 struct ClimateState {
     entity_id: String,
     current_temp_tenths: i32,
+    /// Setpoint (midpoint of the range for dual-setpoint devices).
+    target_tenths: i32,
     current_mode: String,
     pending_mode: String,
     current_fan: Option<String>,
@@ -405,20 +408,31 @@ fn favs_load() {
             name,
             domain: Domain::from_idx(domain_idx),
         });
-        if out.len() >= MAX_FAVS {
-            break;
-        }
     }
     *FAVS.borrow_mut() = out;
 }
 
-fn favs_save() {
+/// Persist favorites; the line format reserves `|` and newlines.
+fn favs_save() -> bool {
     let favs = FAVS.borrow();
     let mut s = String::new();
     for f in favs.iter() {
-        s.push_str(&format!("{}|{}|{}\n", f.id, f.name, f.domain as u8));
+        s.push_str(&format!(
+            "{}|{}|{}\n",
+            favs_field(&f.id),
+            favs_field(&f.name),
+            f.domain as u8
+        ));
     }
-    let _ = nvs::set_str(NVS_FAVS, &s);
+    let ok = nvs::set_str(NVS_FAVS, &s).is_ok();
+    if !ok {
+        ui::push_toast(i18n::tr_key("favs_save_failed"), ui::UI_ICON_ERROR, 1500);
+    }
+    ok
+}
+
+fn favs_field(v: &str) -> String {
+    v.replace(['|', '\n', '\r'], "_")
 }
 
 fn favs_contains(id: &str) -> bool {
@@ -431,7 +445,7 @@ fn http_get(path: &str) -> Option<String> {
     let url = format!("{}{}", base_url()?, path);
     let token = ha_token()?;
     log::info(TAG, &format!("GET {}", url));
-    let req = http::Request::open(http::GET, &url, 8000).ok()?;
+    let req = http::Request::open(http::GET, &url, HTTP_GET_TIMEOUT_MS).ok()?;
     let _ = req.header("Authorization", &format!("Bearer {}", token));
     let _ = req.header("Accept", "application/json");
     let status = req.perform().ok()?;
@@ -439,7 +453,24 @@ fn http_get(path: &str) -> Option<String> {
         log::warn(TAG, &format!("HTTP {} for {}", status, path));
         return None;
     }
-    req.read_to_string().ok()
+    req.read_to_string_max(HTTP_BODY_MAX).ok()
+}
+
+fn state_path(entity_id: &str) -> String {
+    format!("/api/states/{}", percent_encode(entity_id))
+}
+
+/// Encode everything outside the URL unreserved set (RFC 3986).
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
 }
 
 fn http_post(path: &str, body: &str) -> Result<i32, ()> {
@@ -460,8 +491,7 @@ fn http_post(path: &str, body: &str) -> Result<i32, ()> {
 }
 
 fn fetch_one(entity_id: &str) -> Option<Entity> {
-    let path = format!("/api/states/{}", entity_id);
-    let body = http_get(&path)?;
+    let body = http_get(&state_path(entity_id))?;
     parse_state_json(entity_id, &body)
 }
 
@@ -520,7 +550,7 @@ fn fetch_template_all() -> Option<Vec<Entity>> {
         log::warn(TAG, &format!("template POST -> {}", status));
         return None;
     }
-    let text = req.read_to_string().ok()?;
+    let text = req.read_to_string_max(HTTP_BODY_MAX).ok()?;
     let mut out: Vec<Entity> = Vec::with_capacity(256);
     for line in text.split('\n') {
         if line.is_empty() {
@@ -584,8 +614,8 @@ fn call_service(
     extra: Option<&str>,
 ) -> Result<(), ()> {
     let body = match extra {
-        Some(e) => format!("{{\"entity_id\":\"{}\",{}}}", entity_id, e),
-        None => format!("{{\"entity_id\":\"{}\"}}", entity_id),
+        Some(e) => format!("{{\"entity_id\":{},{}}}", json_string(entity_id), e),
+        None => format!("{{\"entity_id\":{}}}", json_string(entity_id)),
     };
     let path = format!("/api/services/{}/{}", domain, service);
     http_post(&path, &body).map(|_| ())
@@ -607,7 +637,11 @@ fn wizard_start() {
     };
     ui::push_t9_input(
         i18n::tr_key("host"),
-        if initial.is_empty() { None } else { Some(&initial) },
+        if initial.is_empty() {
+            None
+        } else {
+            Some(&initial)
+        },
         96,
         ACT_SETUP_HOST_DONE,
     );
@@ -615,7 +649,7 @@ fn wizard_start() {
 
 fn wizard_step_token() {
     let existing = ha_token();
-    ui::push_t9_input(
+    ui::push_password(
         i18n::tr_key("token_title"),
         existing.as_deref(),
         320,
@@ -652,24 +686,45 @@ fn wizard_finalize_with_probe() {
 
     ui::push_toast(i18n::tr_key("probing"), ui::UI_ICON_INFO, 1500);
 
-    let https_url = format!("https://{}{}/api/", host.trim(), port_suffix);
-    let https_ok = probe_url(&https_url);
-    let http_ok = if !https_ok && !user_https {
-        let http_url = format!("http://{}{}/api/", host.trim(), port_suffix);
-        probe_url(&http_url)
-    } else {
-        false
-    };
-
-    if !https_ok && !http_ok {
+    if probe_url(&format!("https://{}{}/api/", host.trim(), port_suffix)) {
+        wizard_save(true);
+    } else if user_https {
         ui::push_toast(i18n::tr_key("ha_unreachable"), ui::UI_ICON_ERROR, 2000);
         home_render();
-        return;
+    } else {
+        ui::push_confirm(
+            i18n::tr_key("ha_http_fallback"),
+            ui::UI_ICON_ALERT,
+            ACT_SETUP_HTTP_CONFIRM,
+        );
     }
+}
 
-    let _ = nvs::set_str(NVS_HOST, host.trim());
-    let _ = nvs::set_str(NVS_PORT, port.trim());
-    let _ = nvs::set_u32(NVS_HTTPS, if https_ok { 1 } else { 0 });
+/// Plain-HTTP probe, only after the user accepted the unencrypted transport.
+fn wizard_probe_http() {
+    let (host, port) = {
+        let w = WIZARD.borrow();
+        (w.host.clone(), w.port.clone())
+    };
+    let port_suffix = if port.trim().is_empty() {
+        String::new()
+    } else {
+        format!(":{}", port.trim())
+    };
+    if probe_url(&format!("http://{}{}/api/", host.trim(), port_suffix)) {
+        wizard_save(false);
+    } else {
+        ui::push_toast(i18n::tr_key("ha_unreachable"), ui::UI_ICON_ERROR, 2000);
+        home_render();
+    }
+}
+
+fn wizard_save(https: bool) {
+    let w = WIZARD.borrow();
+    let _ = nvs::set_str(NVS_HOST, w.host.trim());
+    let _ = nvs::set_str(NVS_PORT, w.port.trim());
+    let _ = nvs::set_u32(NVS_HTTPS, u32::from(https));
+    drop(w);
 
     ui::push_toast(i18n::tr_key("url_saved"), ui::UI_ICON_SUCCESS, 1200);
 
@@ -688,14 +743,18 @@ fn home_render() {
 
     ENTITIES.borrow_mut().clear();
     let mut any_ok = false;
+    let mut reachable = true;
     if configured {
         for f in favs.iter() {
-            match fetch_one(&f.id) {
+            // After the first failed fetch the rest are placeholders, so an
+            // unreachable server costs one timeout instead of one per favorite.
+            match reachable.then(|| fetch_one(&f.id)).flatten() {
                 Some(e) => {
                     ENTITIES.borrow_mut().push(e);
                     any_ok = true;
                 }
                 None => {
+                    reachable = false;
                     let mut ph = Entity::placeholder(&f.id, f.domain);
                     ph.name = f.name.clone();
                     ENTITIES.borrow_mut().push(ph);
@@ -712,7 +771,7 @@ fn home_render() {
         .on_select(ACT_HOME_SELECT)
         .on_menu(ACT_HOME_MENU);
     for (i, e) in ENTITIES.borrow().iter().enumerate() {
-        builder = builder.item(&e.label(), i as u32, e.domain.icon());
+        builder = builder.item(e.label(), i as u32, e.domain.icon());
     }
     builder.replace();
 
@@ -776,7 +835,7 @@ fn home_redraw_only() {
         .on_select(ACT_HOME_SELECT)
         .on_menu(ACT_HOME_MENU);
     for (i, e) in ENTITIES.borrow().iter().enumerate() {
-        builder = builder.item(&e.label(), i as u32, e.domain.icon());
+        builder = builder.item(e.label(), i as u32, e.domain.icon());
     }
     builder.replace();
     ui::set_footer(i18n::tr_key("hint_home"));
@@ -790,21 +849,37 @@ fn home_open_menu() {
 
     if let Some(e) = entity.as_ref() {
         if e.domain == Domain::Light {
-            builder = builder.item(i18n::tr_core("core.brightness"), CTX_BRIGHTNESS, ui::UI_ICON_SUN);
+            builder = builder.item(
+                i18n::tr_core("core.brightness"),
+                CTX_BRIGHTNESS,
+                ui::UI_ICON_SUN,
+            );
             builder = builder.item(i18n::tr_key("color"), CTX_COLOR, ui::UI_ICON_DIAMOND);
         }
         if e.domain == Domain::Cover {
-            builder = builder.item(i18n::tr_key("cover_position"), CTX_COVER_POSITION, ui::UI_ICON_UPDOWN);
+            builder = builder.item(
+                i18n::tr_key("cover_position"),
+                CTX_COVER_POSITION,
+                ui::UI_ICON_UPDOWN,
+            );
         }
     }
     if configured {
-        builder = builder.item(i18n::tr_key("browse_all"), CTX_BROWSE, ui::UI_ICON_ARROW_RIGHT);
+        builder = builder.item(
+            i18n::tr_key("browse_all"),
+            CTX_BROWSE,
+            ui::UI_ICON_ARROW_RIGHT,
+        );
     }
     if entity.is_some() {
         builder = builder.item(i18n::tr_key("remove"), CTX_REMOVE, ui::UI_ICON_REMOVE);
     }
     builder = builder.item(i18n::tr_key("setup_wizard"), CTX_SETUP, ui::UI_ICON_PLAY);
-    builder = builder.item(i18n::tr_key("token_title"), CTX_EDIT_TOKEN, ui::UI_ICON_PARAGRAPH);
+    builder = builder.item(
+        i18n::tr_key("token_title"),
+        CTX_EDIT_TOKEN,
+        ui::UI_ICON_PARAGRAPH,
+    );
     builder = builder.item(i18n::tr_key("reset_module"), CTX_RESET, ui::UI_ICON_ALERT);
     builder.push();
 }
@@ -858,7 +933,6 @@ fn home_ctx_pick(item_id: u32) {
     }
 }
 
-
 // =================== Browse View ===================
 
 fn browse_open() {
@@ -911,7 +985,12 @@ fn browse_render() {
         FILTER_ALL => "all".to_string(),
         d => Domain::from_idx(d as u8).as_str().to_string(),
     };
-    let title = format!("{} [{}/{}]", i18n::tr_key("browse"), b.visible.len(), b.all.len());
+    let title = format!(
+        "{} [{}/{}]",
+        i18n::tr_key("browse"),
+        b.visible.len(),
+        b.all.len()
+    );
     let mut builder = ui::ListBuilder::new(&title)
         .on_select(ACT_BROWSE_SELECT)
         .on_menu(ACT_BROWSE_MENU);
@@ -954,10 +1033,12 @@ fn browse_select(idx: u32) {
             domain: entity.domain,
         });
     }
-    favs_save();
+    let saved = favs_save();
     ui::pop();
     home_render();
-    ui::push_toast(i18n::tr_key("added"), ui::UI_ICON_SUCCESS, 800);
+    if saved {
+        ui::push_toast(i18n::tr_key("added"), ui::UI_ICON_SUCCESS, 800);
+    }
 }
 
 fn browse_open_filter_menu() {
@@ -965,14 +1046,46 @@ fn browse_open_filter_menu() {
         ui::ListBuilder::new(i18n::tr_key("filter")).on_select(ACT_BROWSE_FILTER_PICK);
     builder = builder.item(i18n::tr_key("search"), FILTER_SEARCH, ui::UI_ICON_CIRCLE);
     builder = builder.item(i18n::tr_key("all_domains"), FILTER_ALL, ui::UI_ICON_BAR);
-    builder = builder.item(i18n::tr_key("lights"), Domain::Light as u32, ui::UI_ICON_LIGHT);
-    builder = builder.item(i18n::tr_key("switches"), Domain::Switch as u32, ui::UI_ICON_SWITCH);
-    builder = builder.item(i18n::tr_key("scenes"), Domain::Scene as u32, ui::UI_ICON_SCENE);
-    builder = builder.item(i18n::tr_key("scripts"), Domain::Script as u32, ui::UI_ICON_MUSIC);
-    builder = builder.item(i18n::tr_key("buttons"), Domain::Button as u32, ui::UI_ICON_PLAY);
-    builder = builder.item(i18n::tr_key("covers"), Domain::Cover as u32, ui::UI_ICON_COVER);
-    builder = builder.item(i18n::tr_key("climates"), Domain::Climate as u32, ui::UI_ICON_SUN);
-    builder = builder.item(i18n::tr_key("sensors"), Domain::Sensor as u32, ui::UI_ICON_SENSOR);
+    builder = builder.item(
+        i18n::tr_key("lights"),
+        Domain::Light as u32,
+        ui::UI_ICON_LIGHT,
+    );
+    builder = builder.item(
+        i18n::tr_key("switches"),
+        Domain::Switch as u32,
+        ui::UI_ICON_SWITCH,
+    );
+    builder = builder.item(
+        i18n::tr_key("scenes"),
+        Domain::Scene as u32,
+        ui::UI_ICON_SCENE,
+    );
+    builder = builder.item(
+        i18n::tr_key("scripts"),
+        Domain::Script as u32,
+        ui::UI_ICON_MUSIC,
+    );
+    builder = builder.item(
+        i18n::tr_key("buttons"),
+        Domain::Button as u32,
+        ui::UI_ICON_PLAY,
+    );
+    builder = builder.item(
+        i18n::tr_key("covers"),
+        Domain::Cover as u32,
+        ui::UI_ICON_COVER,
+    );
+    builder = builder.item(
+        i18n::tr_key("climates"),
+        Domain::Climate as u32,
+        ui::UI_ICON_SUN,
+    );
+    builder = builder.item(
+        i18n::tr_key("sensors"),
+        Domain::Sensor as u32,
+        ui::UI_ICON_SENSOR,
+    );
     builder.push();
 }
 
@@ -982,7 +1095,11 @@ fn browse_filter_pick(item_id: u32) {
         let initial = BROWSE.borrow().search.clone();
         ui::push_t9_input(
             i18n::tr_key("search"),
-            if initial.is_empty() { None } else { Some(&initial) },
+            if initial.is_empty() {
+                None
+            } else {
+                Some(&initial)
+            },
             48,
             ACT_BROWSE_SEARCH_DONE,
         );
@@ -1005,7 +1122,7 @@ fn browse_search_done(text: Option<String>) {
 
 fn light_brightness_start(e: &Entity) {
     *SELECTED.borrow_mut() = Some(e.clone());
-    let initial = e.brightness_pct.max(1).min(100) as i32;
+    let initial = e.brightness_pct.clamp(1, 100) as i32;
     ui::SliderBuilder::new(i18n::tr_core("core.brightness"))
         .range(0, 100)
         .initial(initial)
@@ -1154,17 +1271,17 @@ fn parse_climate_state(entity_id: &str, body: &str) -> Option<ClimateState> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let (has_range, spread_tenths) = match (target_low, target_high) {
-        (Some(lo), Some(hi)) => (true, ((hi - lo) * 10.0) as i32),
-        _ => (false, 0),
+    let (has_range, spread_tenths, target_tenths) = match (target_low, target_high) {
+        (Some(lo), Some(hi)) => (true, ((hi - lo) * 10.0) as i32, ((lo + hi) * 5.0) as i32),
+        _ => (false, 0, (target * 10.0) as i32),
     };
-    let _ = target;
 
     let slot_modes = resolve_mode_slots(&modes);
 
     Some(ClimateState {
         entity_id: entity_id.to_string(),
         current_temp_tenths: (current * 10.0) as i32,
+        target_tenths,
         current_mode: state.clone(),
         pending_mode: state,
         current_fan: current_fan.clone(),
@@ -1198,9 +1315,7 @@ fn resolve_mode_slots(modes: &[String]) -> [Option<String>; 3] {
         slots[2] = Some("cool".to_string());
     } else {
         for fb in ["auto", "heat_cool", "dry", "fan_only"].iter() {
-            if modes.iter().any(|m| m.as_str() == *fb)
-                && slots[1].as_deref() != Some(*fb)
-            {
+            if modes.iter().any(|m| m.as_str() == *fb) && slots[1].as_deref() != Some(*fb) {
                 slots[2] = Some((*fb).to_string());
                 break;
             }
@@ -1210,7 +1325,7 @@ fn resolve_mode_slots(modes: &[String]) -> [Option<String>; 3] {
 }
 
 fn climate_open(e: &Entity) {
-    let body = match http_get(&format!("/api/states/{}", e.id)) {
+    let body = match http_get(&state_path(&e.id)) {
         Some(b) => b,
         None => {
             ui::push_toast(i18n::tr_key("ha_unreachable"), ui::UI_ICON_ERROR, 1500);
@@ -1225,14 +1340,16 @@ fn climate_open(e: &Entity) {
         }
     };
 
-    let target_tenths = if st.has_range {
-        ((st.min_temp_tenths + st.max_temp_tenths) / 2).clamp(
+    let (lo, hi) = if st.has_range {
+        (
             st.min_temp_tenths + st.range_spread_tenths / 2,
             st.max_temp_tenths - st.range_spread_tenths / 2,
         )
     } else {
-        st.current_temp_tenths.clamp(st.min_temp_tenths, st.max_temp_tenths)
+        (st.min_temp_tenths, st.max_temp_tenths)
     };
+    st.target_tenths = clamp_ordered(st.target_tenths, lo, hi);
+    let target_tenths = st.target_tenths;
 
     canvas::push(&e.name, ACT_CLIMATE_KEY, ACT_CLIMATE_WIDGET);
     canvas::add_slider(
@@ -1280,7 +1397,7 @@ fn climate_render() {
     let bar_w = (w as i16) - 40;
     canvas::draw_rect(bar_x, bar_y, bar_w, bar_h, false);
     let range = (st.max_temp_tenths - st.min_temp_tenths).max(1);
-    let fill = ((target - st.min_temp_tenths) as i32 * (bar_w as i32 - 4) / range as i32) as i16;
+    let fill = ((target - st.min_temp_tenths) as i32 * (bar_w as i32 - 4) / range) as i16;
     canvas::draw_rect(bar_x + 2, bar_y + 2, fill.max(0), bar_h - 4, true);
 
     canvas::set_text_size(1);
@@ -1307,7 +1424,13 @@ fn climate_render() {
         } else {
             canvas::draw_rect(x, btn_y, btn_w - 4, btn_h, false);
             canvas::set_text_inverted(false);
-            canvas::draw_text_aligned(x + 2, btn_y + 3, btn_w - 8, key_label.as_str(), canvas::ALIGN_CENTER);
+            canvas::draw_text_aligned(
+                x + 2,
+                btn_y + 3,
+                btn_w - 8,
+                key_label.as_str(),
+                canvas::ALIGN_CENTER,
+            );
         }
     }
     canvas::set_text_inverted(false);
@@ -1326,15 +1449,19 @@ fn climate_render() {
 
 fn mode_label(mode: &str) -> &str {
     match mode {
-        "off" => "Aus",
-        "heat" => "Heizen",
-        "cool" => "Kuehlen",
-        "auto" => "Auto",
-        "dry" => "Dry",
-        "fan_only" => "Fan",
-        "heat_cool" => "Auto",
+        "off" => i18n::tr_key("mode_off"),
+        "heat" => i18n::tr_key("mode_heat"),
+        "cool" => i18n::tr_key("mode_cool"),
+        "auto" | "heat_cool" => i18n::tr_key("mode_auto"),
+        "dry" => i18n::tr_key("mode_dry"),
+        "fan_only" => i18n::tr_key("mode_fan"),
         _ => mode,
     }
+}
+
+/// `i32::clamp` panics on inverted bounds; device-reported limits can be.
+fn clamp_ordered(v: i32, a: i32, b: i32) -> i32 {
+    v.clamp(a.min(b), a.max(b))
 }
 
 fn format_temp(tenths: i32, unit: &str) -> String {
@@ -1398,7 +1525,7 @@ fn climate_commit() {
     let mut any_err = false;
 
     if st.pending_mode != st.current_mode {
-        let extra = format!("\"hvac_mode\":\"{}\"", st.pending_mode);
+        let extra = format!("\"hvac_mode\":{}", json_string(&st.pending_mode));
         if call_service("climate", "set_hvac_mode", &st.entity_id, Some(&extra)).is_err() {
             any_err = true;
         }
@@ -1430,7 +1557,7 @@ fn climate_commit() {
     }
     if st.pending_fan != st.current_fan {
         if let Some(fan) = st.pending_fan.as_ref() {
-            let extra = format!("\"fan_mode\":\"{}\"", fan);
+            let extra = format!("\"fan_mode\":{}", json_string(fan));
             if call_service("climate", "set_fan_mode", &st.entity_id, Some(&extra)).is_err() {
                 any_err = true;
             }
@@ -1471,11 +1598,7 @@ impl From<&ClimateState> for ClimateSnapshot {
             pending_fan: s.pending_fan.clone(),
             range_spread_tenths: s.range_spread_tenths,
             has_range: s.has_range,
-            start_target_tenths: if s.has_range {
-                (s.min_temp_tenths + s.max_temp_tenths) / 2
-            } else {
-                s.current_temp_tenths
-            },
+            start_target_tenths: s.target_tenths,
         }
     }
 }
@@ -1548,7 +1671,11 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
         ACT_BROWSE_MENU => browse_open_filter_menu(),
         ACT_BROWSE_FILTER_PICK => browse_filter_pick(user_data),
         ACT_BROWSE_SEARCH_DONE => {
-            let text = if user_data == 1 { ui::consume_input_text(48) } else { None };
+            let text = if user_data == 1 {
+                ui::consume_input_text(48)
+            } else {
+                None
+            };
             browse_search_done(text);
         }
 
@@ -1579,13 +1706,23 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
                 home_render();
             }
         }
+        ACT_SETUP_HTTP_CONFIRM => {
+            if user_data == 1 {
+                wizard_probe_http();
+            } else {
+                home_render();
+            }
+        }
         ACT_SETUP_TOKEN_DONE => {
             if user_data == 1 {
                 if let Some(t) = ui::consume_input_text(320) {
                     let trimmed = t.trim();
                     if !trimmed.is_empty() {
-                        let _ = rmem::write(TOKEN_NAME, trimmed.as_bytes());
-                        ui::push_toast(i18n::tr_key("token_ok"), ui::UI_ICON_SUCCESS, 1000);
+                        if rmem::write(TOKEN_NAME, trimmed.as_bytes()).is_ok() {
+                            ui::push_toast(i18n::tr_key("token_ok"), ui::UI_ICON_SUCCESS, 1000);
+                        } else {
+                            ui::push_toast(i18n::tr_key("save_failed"), ui::UI_ICON_ERROR, 1500);
+                        }
                     }
                 }
             }
@@ -1629,8 +1766,10 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
                         favs.remove(i);
                     }
                     drop(favs);
-                    favs_save();
-                    ui::push_toast(i18n::tr_key("removed"), ui::UI_ICON_SUCCESS, 800);
+                    SELECTED.borrow_mut().take();
+                    if favs_save() {
+                        ui::push_toast(i18n::tr_key("removed"), ui::UI_ICON_SUCCESS, 800);
+                    }
                 }
             } else {
                 PENDING_REMOVE.borrow_mut().take();

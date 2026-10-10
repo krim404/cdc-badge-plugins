@@ -34,7 +34,8 @@
     "gpio_pins": [4, 5, 6, 7, 9, 14, 38, 40, 43, 44],
     "ui_exclusive": true,
     "prevent_sleep": true,
-    "nvs_namespace": "plg_gpio_mqtt"
+    "nvs_namespace": "plg_gpio_mqtt",
+    "rmem": ["mqtt_pass"]
   },
   "prerequisites": {
     "wifi_connected": {

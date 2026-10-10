@@ -27,6 +27,8 @@ const ITEM_SEND: u32 = 0;
 const ITEM_INBOX: u32 = 1;
 
 const MAX_TEXT: u16 = 200;
+/// Oldest messages are dropped beyond this many.
+const INBOX_MAX: usize = 16;
 
 // Foreground-only plugin running single-threaded in the WASM sandbox.
 static mut INBOX: Vec<String> = Vec::new();
@@ -87,9 +89,9 @@ pub extern "C" fn plugin_on_action(action_id: u32, _idx: u32, user_data: u32) ->
                 show_inbox();
             }
         }
-        ACT_COMPOSE => {
+        ACT_COMPOSE
             // user_data == 1 on confirm, 0 on cancel (the view popped itself).
-            if user_data == 1 {
+            if user_data == 1 => {
                 if let Some(text) = ui::consume_input_text(MAX_TEXT as usize) {
                     // Remember the pairing for this session so a back-and-forth
                     // chat with the same badge only confirms the code once.
@@ -98,12 +100,13 @@ pub extern "C" fn plugin_on_action(action_id: u32, _idx: u32, user_data: u32) ->
                     }
                 }
             }
-        }
         ACT_RECEIVED => {
             if let Some((_mime, text)) = msg::consume_text(msg::PAYLOAD_MAX) {
-                unsafe {
-                    (*core::ptr::addr_of_mut!(INBOX)).push(text.clone());
+                let inbox = unsafe { &mut *core::ptr::addr_of_mut!(INBOX) };
+                if inbox.len() >= INBOX_MAX {
+                    inbox.remove(0);
                 }
+                inbox.push(text.clone());
                 ui::push_info(i18n::tr_key("received"), &text);
             }
         }

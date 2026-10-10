@@ -69,13 +69,19 @@ const URL_MAX_LEN: u16 = 200;
 // "fetch failed" toast on a flaky link.
 const FETCH_TIMEOUT_MS: u32 = 30_000;
 
+// Upper bound for the feed body. The plugin has 128 KiB of linear memory and
+// the body is held twice while parsing, so stay well below that.
+const FEED_MAX_BYTES: usize = 64 * 1024;
+
 // Action IDs we attach to UI elements (lists, T9 dialog) so that the
 // single `plugin_on_action` entry point can tell them apart later.
 // Named constants beat magic numbers in any non-trivial plugin.
-const ACTION_VIEW_TITLE: u32 = 1;     // user opened one of the headlines
-const ACTION_EDIT_URL: u32 = 2;       // user pressed the menu key
-const ACTION_EDIT_URL_DONE: u32 = 3;  // T9 dialog confirmed/cancelled
-const ACTION_KEY_EVENT: u32 = 4;      // key press dispatched via event bus
+const ACTION_VIEW_TITLE: u32 = 1; // user opened one of the headlines
+const ACTION_EDIT_URL: u32 = 2; // user pressed the menu key
+const ACTION_EDIT_URL_DONE: u32 = 3; // T9 dialog confirmed/cancelled
+const ACTION_KEY_EVENT: u32 = 4; // key press dispatched via event bus
+const ACTION_LIST_HIDE: u32 = 5; // headline list covered by another view
+const ACTION_LIST_SHOW: u32 = 6; // headline list visible again
 
 // ASCII for the digit keys; user_data of plugin_on_action carries the key
 // code when fired via the KEY_PRESSED event subscription (idx is the event
@@ -132,6 +138,9 @@ static CURRENT_URL: PluginCell<String> = PluginCell::new(String::new());
 // the editor closes - otherwise pressing '1' inside the editor re-fetches
 // and pushes a fresh list over the T9 dialog.
 static EDITING_URL: PluginCell<bool> = PluginCell::new(false);
+// True while another view (an opened headline) covers the list; the reload
+// hotkey is ignored until the list is visible again.
+static LIST_COVERED: PluginCell<bool> = PluginCell::new(false);
 
 /// \brief Read the user-configured feed URL from NVS, or fall back to the
 ///        hardcoded Golem default.
@@ -155,10 +164,15 @@ fn strip_html(input: &str) -> String {
     let mut last_space = true;
     for ch in input.chars() {
         if in_tag {
-            if ch == '>' { in_tag = false; }
+            if ch == '>' {
+                in_tag = false;
+            }
             continue;
         }
-        if ch == '<' { in_tag = true; continue; }
+        if ch == '<' {
+            in_tag = true;
+            continue;
+        }
         if ch.is_whitespace() {
             if !last_space {
                 out.push(' ');
@@ -194,7 +208,9 @@ fn strip_cdata(s: &str) -> &str {
 /// \return `None` if the title is missing or empty.
 fn extract_first_entry(entry: &str) -> Option<Entry> {
     let title_raw = strip_cdata(extract_tag(entry, "title")?).trim();
-    if title_raw.is_empty() { return None; }
+    if title_raw.is_empty() {
+        return None;
+    }
     let summary_raw = extract_tag(entry, "summary")
         .or_else(|| extract_tag(entry, "description"))
         .or_else(|| extract_tag(entry, "content"))
@@ -203,7 +219,10 @@ fn extract_first_entry(entry: &str) -> Option<Entry> {
         .unwrap_or("");
     let title_dec = title_raw.to_string();
     let summary_dec = strip_html(summary_raw);
-    Some(Entry { title: title_dec, summary: summary_dec })
+    Some(Entry {
+        title: title_dec,
+        summary: summary_dec,
+    })
 }
 
 /// \brief Walk an Atom feed body and collect up to `max` entry titles.
@@ -272,14 +291,12 @@ fn fetch_body(url: &str) -> Result<String, &'static str> {
 
     // Reject anything outside the success range. Following redirects
     // is the host's job.
-    if status < 200 || status >= 300 {
+    if !(200..300).contains(&status) {
         return Err("http");
     }
 
-    // Read the body. This buffers the whole response in RAM - safe
-    // because the firmware imposes a hard cap on response size, but
-    // keep this in mind if you ever need to handle multi-MB feeds.
-    req.read_to_string().map_err(|_| "read")
+    // Read the body, capped: it is buffered whole in the plugin's RAM.
+    req.read_to_string_max(FEED_MAX_BYTES).map_err(|_| "read")
 }
 
 /// \brief Fetch the feed, parse it and render the headline list.
@@ -346,9 +363,12 @@ fn fetch_and_render() {
         }
     }
 
-    // Finalise the list view. `push` adds it to the UI stack as a new
-    // screen (unlike `replace` in `grove_blink` which swaps in place).
-    builder.push();
+    // Finalise the list view. `replace` swaps our previous list in place
+    // (a reload must not stack a new screen each time) and falls back to a
+    // plain push on the first render.
+    builder.replace();
+    ui::set_view_lifecycle(ACTION_LIST_HIDE, ACTION_LIST_SHOW);
+    *LIST_COVERED.borrow_mut() = false;
 
     // The footer is the small hint line at the bottom. It is a great
     // place to remind the user about the menu key shortcut.
@@ -382,10 +402,8 @@ pub extern "C" fn plugin_deinit() -> i32 {
 // this example keeps things linear to stay readable.
 #[no_mangle]
 pub extern "C" fn plugin_on_enter() -> i32 {
-    let _ = cdc_badge_plugin::event::subscribe(
-        cdc_badge_plugin::event::KEY_PRESSED,
-        ACTION_KEY_EVENT,
-    );
+    let _ =
+        cdc_badge_plugin::event::subscribe(cdc_badge_plugin::event::KEY_PRESSED, ACTION_KEY_EVENT);
     fetch_and_render();
     0
 }
@@ -451,10 +469,12 @@ pub extern "C" fn plugin_on_action(action_id: u32, idx: u32, user_data: u32) -> 
             // KEY_PRESSED dispatched from EventBus: `idx` is the event
             // type (always 0 here), `user_data` is the ASCII key code.
             let _ = idx;
-            if user_data == KEY_RELOAD && !*EDITING_URL.borrow() {
+            if user_data == KEY_RELOAD && !*EDITING_URL.borrow() && !*LIST_COVERED.borrow() {
                 fetch_and_render();
             }
         }
+        ACTION_LIST_HIDE => *LIST_COVERED.borrow_mut() = true,
+        ACTION_LIST_SHOW => *LIST_COVERED.borrow_mut() = false,
         ACTION_EDIT_URL_DONE => {
             // The editor closed (confirm or cancel) - re-arm the hotkeys.
             *EDITING_URL.borrow_mut() = false;
@@ -502,8 +522,14 @@ mod tests {
 
     #[test]
     fn extract_tag_basic() {
-        assert_eq!(extract_tag("<entry><title>hi</title></entry>", "title"), Some("hi"));
-        assert_eq!(extract_tag("<title type=\"text\">attr</title>", "title"), Some("attr"));
+        assert_eq!(
+            extract_tag("<entry><title>hi</title></entry>", "title"),
+            Some("hi")
+        );
+        assert_eq!(
+            extract_tag("<title type=\"text\">attr</title>", "title"),
+            Some("attr")
+        );
         assert_eq!(extract_tag("<entry></entry>", "title"), None);
     }
 
