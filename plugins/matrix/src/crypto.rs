@@ -412,10 +412,11 @@ impl Crypto {
     ) -> Option<String> {
         let entry = self.inbound.get_mut(session_id)?;
         // A session restored without a room binding (older snapshots) stays
-        // unusable until a key import binds it; events never bind.
+        // unusable until a key import binds it; events never bind. An event
+        // must carry the bound sender key: omitting it is not a match.
         if entry.room_id.is_empty()
-            || !binding_matches(&entry.room_id, room_id)
-            || !binding_matches(&entry.sender_key, sender_key)
+            || entry.room_id != room_id
+            || (!entry.sender_key.is_empty() && entry.sender_key != sender_key)
         {
             return None;
         }
@@ -875,6 +876,8 @@ mod tests {
             .encrypt(room_event("again", ROOM).as_bytes())
             .to_base64();
         assert_eq!(c.decrypt_megolm(&sid, &ct2, ROOM, "otherCurve"), None);
+        // Stripping the sender key from the event does not bypass the binding.
+        assert_eq!(c.decrypt_megolm(&sid, &ct2, ROOM, ""), None);
         // Bindings are fixed once set.
         assert!(!c.import_room_key(&sid, &key, ROOM, "otherCurve"));
     }
