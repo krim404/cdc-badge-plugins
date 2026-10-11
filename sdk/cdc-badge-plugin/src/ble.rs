@@ -231,6 +231,16 @@ pub fn conn_handle() -> u32 {
     unsafe { host_ble_conn_handle() }
 }
 
+/// \brief Identity address and address type of the peer on `conn`, in the
+///        byte order of [`ScanResult::addr`]. `Err(NotFound)` when `conn` is
+///        not an open connection.
+pub fn conn_peer(conn: u32) -> Result<([u8; 6], u8)> {
+    let mut addr = [0u8; 6];
+    let mut addr_type = 0u8;
+    check(unsafe { host_ble_conn_peer(conn, addr.as_mut_ptr(), &mut addr_type) })?;
+    Ok((addr, addr_type))
+}
+
 /// \brief Disconnect a connection.
 pub fn disconnect(conn: u32) -> Result<()> {
     check(unsafe { host_ble_disconnect(conn) })
@@ -358,6 +368,7 @@ extern "C" {
     fn host_ble_scan_results(out: *mut ScanResultRaw, count: *mut usize) -> c_int;
     fn host_ble_connect(addr: *const u8, addr_type: u8) -> c_int;
     fn host_ble_conn_handle() -> u32;
+    fn host_ble_conn_peer(conn: u32, addr_out: *mut u8, addr_type_out: *mut u8) -> c_int;
     fn host_ble_disconnect(conn: u32) -> c_int;
     fn host_ble_discover(conn: u32, uuid: *const u8, action_id: u32) -> c_int;
     fn host_ble_consume_discovery(out: *mut RemoteChar, count: *mut usize) -> c_int;

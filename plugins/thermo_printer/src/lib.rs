@@ -652,6 +652,15 @@ mod plugin {
         }
     }
 
+    /// True when `conn` leads to the saved printer; a foreign peer that
+    /// connected meanwhile is left alone until the connect timeout.
+    fn is_saved_printer(conn: u32) -> bool {
+        match (saved_printer(), ble::conn_peer(conn)) {
+            (Some((want, _)), Ok((have, _))) => want == have,
+            _ => false,
+        }
+    }
+
     fn on_connected() {
         s().conn = ble::conn_handle();
         if s().conn == 0 {
@@ -1291,7 +1300,8 @@ mod plugin {
                 }
             }
             Drive::Connecting { since } => {
-                if ble::conn_handle() != 0 {
+                let conn = ble::conn_handle();
+                if conn != 0 && is_saved_printer(conn) {
                     on_connected();
                 } else if uptime_ms.saturating_sub(*since) > CONNECT_TIMEOUT_MS {
                     fail_print("connect timeout");
