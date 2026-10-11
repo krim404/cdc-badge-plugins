@@ -344,17 +344,27 @@ impl Crypto {
         {
             return false;
         }
-        if held.session.compare(&mut session) != SessionOrdering::Worse {
-            return false;
+        // Only a session connected to the held one (same key chain) may
+        // replace it or supply missing bindings.
+        let ordering = held.session.compare(&mut session);
+        let mut changed = false;
+        match ordering {
+            SessionOrdering::Unconnected => return false,
+            SessionOrdering::Worse => {
+                held.session = session;
+                changed = true;
+            }
+            SessionOrdering::Equal | SessionOrdering::Better => {}
         }
-        held.session = session;
-        if held.room_id.is_empty() {
+        if held.room_id.is_empty() && !room_id.is_empty() {
             held.room_id = room_id.to_string();
+            changed = true;
         }
-        if held.sender_key.is_empty() {
+        if held.sender_key.is_empty() && !sender_key.is_empty() {
             held.sender_key = sender_key.to_string();
+            changed = true;
         }
-        true
+        changed
     }
 
     /// Decrypt one backed-up session blob and import its Megolm session.
@@ -401,7 +411,10 @@ impl Crypto {
         sender_key: &str,
     ) -> Option<String> {
         let entry = self.inbound.get_mut(session_id)?;
-        if !binding_matches(&entry.room_id, room_id)
+        // A session restored without a room binding (older snapshots) stays
+        // unusable until a key import binds it; events never bind.
+        if entry.room_id.is_empty()
+            || !binding_matches(&entry.room_id, room_id)
             || !binding_matches(&entry.sender_key, sender_key)
         {
             return None;
@@ -411,14 +424,6 @@ impl Crypto {
         let v: serde_json::Value = serde_json::from_slice(&decrypted.plaintext).ok()?;
         if v.get("room_id").and_then(|r| r.as_str()) != Some(room_id) {
             return None;
-        }
-        // An entry restored without bindings (older snapshots) is pinned to
-        // the first room and sender it decrypts for.
-        if entry.room_id.is_empty() {
-            entry.room_id = room_id.to_string();
-        }
-        if entry.sender_key.is_empty() && !sender_key.is_empty() {
-            entry.sender_key = sender_key.to_string();
         }
         Some(v.get("content")?.get("body")?.as_str()?.to_string())
     }
@@ -847,27 +852,31 @@ mod tests {
     }
 
     #[test]
-    fn unbound_legacy_entry_is_pinned_on_first_decrypt() {
+    fn unbound_entry_decrypts_only_after_a_connected_import_binds_it() {
         let mut c = Crypto::new(Account::new());
         let mut group = GroupSession::new(SessionConfig::version_1());
         let sid = group.session_id();
-        assert!(c.import_room_key(&sid, &group.session_key().to_base64(), "", ""));
+        let key = group.session_key().to_base64();
+        assert!(c.import_room_key(&sid, &key, "", ""));
 
+        // Events never bind: an unbound entry is not used for decryption.
         let ct = group.encrypt(room_event("hi", ROOM).as_bytes()).to_base64();
+        assert_eq!(c.decrypt_megolm(&sid, &ct, ROOM, SENDER), None);
+
+        // A foreign key cannot bind it, a connected import can.
+        let other = GroupSession::new(SessionConfig::version_1());
+        assert!(!c.import_room_key(&sid, &other.session_key().to_base64(), ROOM, SENDER));
+        assert!(c.import_room_key(&sid, &key, ROOM, SENDER));
         assert_eq!(
             c.decrypt_megolm(&sid, &ct, ROOM, SENDER).as_deref(),
             Some("hi")
         );
-        // Pinned now: another sender or room no longer decrypts.
         let ct2 = group
             .encrypt(room_event("again", ROOM).as_bytes())
             .to_base64();
         assert_eq!(c.decrypt_megolm(&sid, &ct2, ROOM, "otherCurve"), None);
-        assert_eq!(c.decrypt_megolm(&sid, &ct2, "!other:s", SENDER), None);
-        assert_eq!(
-            c.decrypt_megolm(&sid, &ct2, ROOM, SENDER).as_deref(),
-            Some("again")
-        );
+        // Bindings are fixed once set.
+        assert!(!c.import_room_key(&sid, &key, ROOM, "otherCurve"));
     }
 
     #[test]
