@@ -412,6 +412,14 @@ impl Crypto {
         if v.get("room_id").and_then(|r| r.as_str()) != Some(room_id) {
             return None;
         }
+        // An entry restored without bindings (older snapshots) is pinned to
+        // the first room and sender it decrypts for.
+        if entry.room_id.is_empty() {
+            entry.room_id = room_id.to_string();
+        }
+        if entry.sender_key.is_empty() && !sender_key.is_empty() {
+            entry.sender_key = sender_key.to_string();
+        }
         Some(v.get("content")?.get("body")?.as_str()?.to_string())
     }
 
@@ -835,6 +843,30 @@ mod tests {
         assert_eq!(
             c.decrypt_megolm(&sid2, &ct0, ROOM, SENDER).as_deref(),
             Some("first")
+        );
+    }
+
+    #[test]
+    fn unbound_legacy_entry_is_pinned_on_first_decrypt() {
+        let mut c = Crypto::new(Account::new());
+        let mut group = GroupSession::new(SessionConfig::version_1());
+        let sid = group.session_id();
+        assert!(c.import_room_key(&sid, &group.session_key().to_base64(), "", ""));
+
+        let ct = group.encrypt(room_event("hi", ROOM).as_bytes()).to_base64();
+        assert_eq!(
+            c.decrypt_megolm(&sid, &ct, ROOM, SENDER).as_deref(),
+            Some("hi")
+        );
+        // Pinned now: another sender or room no longer decrypts.
+        let ct2 = group
+            .encrypt(room_event("again", ROOM).as_bytes())
+            .to_base64();
+        assert_eq!(c.decrypt_megolm(&sid, &ct2, ROOM, "otherCurve"), None);
+        assert_eq!(c.decrypt_megolm(&sid, &ct2, "!other:s", SENDER), None);
+        assert_eq!(
+            c.decrypt_megolm(&sid, &ct2, ROOM, SENDER).as_deref(),
+            Some("again")
         );
     }
 
