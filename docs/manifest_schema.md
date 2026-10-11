@@ -11,7 +11,7 @@ Every plugin ships a JSON manifest next to its `.wasm`. The host parses it at lo
 | `author` | string | no | Free text. |
 | `icon` | string | no | Built-in icon identifier (`info`, `battery`, `ha`, ...). |
 | `host_api_level_min` | string | yes | Minimum host API level required, `MAJOR.MINOR`. |
-| `linear_memory_kb` | int | yes | WAMR linear memory size, 16-4096 KB. |
+| `linear_memory_kb` | int | yes | Declared linear memory, 16-1024 KB. Informational: the firmware validates the range and shows the value, the module's own memory declaration sizes the instance. |
 | `i18n` | object | no | Localised strings (see below). |
 | `capabilities` | object | no | What the plugin is allowed to do. |
 | `prerequisites` | object | no | What the host must establish before running the plugin. |
